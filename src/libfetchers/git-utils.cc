@@ -690,6 +690,7 @@ struct GitSourceAccessor : SourceAccessor
     struct State
     {
         ref<GitRepoImpl> repo;
+        std::string gitRev;
         Object root;
         std::optional<lfs::Fetch> lfsFetch = std::nullopt;
     };
@@ -697,11 +698,14 @@ struct GitSourceAccessor : SourceAccessor
     Sync<State> state_;
 
     GitSourceAccessor(ref<GitRepoImpl> repo_, const Hash & rev, bool smudgeLfs)
-        : state_{State{
-              .repo = repo_,
-              .root = peelToTreeOrBlob(lookupObject(*repo_, hashToOID(rev)).get()),
-              .lfsFetch = smudgeLfs ? std::make_optional(lfs::Fetch(*repo_, hashToOID(rev))) : std::nullopt,
-          }}
+        : state_{
+                State {
+                    .repo = repo_,
+                    .gitRev = rev.gitRev(),
+                    .root = peelToTreeOrBlob(lookupObject(*repo_, hashToOID(rev)).get()),
+                    .lfsFetch = smudgeLfs ? std::make_optional(lfs::Fetch(*repo_, hashToOID(rev))) : std::nullopt,
+                }
+            }
     {
     }
 
@@ -728,7 +732,28 @@ struct GitSourceAccessor : SourceAccessor
             }
         }
 
-        return std::string((const char *) git_blob_rawcontent(blob.get()), git_blob_rawsize(blob.get()));
+        // Apply git filters including CRLF conversion
+        git_buf filtered = GIT_BUF_INIT;
+        git_blob_filter_options opts = GIT_BLOB_FILTER_OPTIONS_INIT;
+
+        git_oid oid;
+        if (git_oid_fromstr(&oid, state->gitRev.c_str()))
+            throw Error("cannot convert '%s' to a Git OID", state->gitRev.c_str());
+
+        opts.attr_commit_id = oid;
+        opts.flags = GIT_BLOB_FILTER_ATTRIBUTES_FROM_COMMIT;
+
+        int error = git_blob_filter(&filtered, blob.get(), path.rel_c_str(), &opts);
+        if (error != 0) {
+            const git_error *e = git_error_last();
+            std::string errorMsg = e ? e->message : "Unknown error";
+            git_buf_dispose(&filtered);
+            throw std::runtime_error("Failed to filter blob: " + errorMsg);
+        }
+        std::string result(filtered.ptr, filtered.size);
+        git_buf_dispose(&filtered);
+
+        return result;
     }
 
     std::string readFile(const CanonPath & path) override
