@@ -509,10 +509,17 @@ struct GitRepoImpl : GitRepo, std::enable_shared_from_this<GitRepoImpl>
     /**
      * A 'GitSourceAccessor' with no regard for export-ignore or any other transformations.
      */
-    ref<GitSourceAccessor> getRawAccessor(const Hash & rev, bool smudgeLfs = false);
+    ref<GitSourceAccessor> getRawAccessor(
+        const Hash & rev,
+        bool smudgeLfs = false,
+        bool applyFilters = false);
 
-    ref<SourceAccessor>
-    getAccessor(const Hash & rev, bool exportIgnore, std::string displayPrefix, bool smudgeLfs = false) override;
+    ref<SourceAccessor> getAccessor(
+        const Hash & rev,
+        bool exportIgnore,
+        std::string displayPrefix,
+        bool smudgeLfs = false,
+        bool applyFilters = false) override;
 
     ref<SourceAccessor> getAccessor(const WorkdirInfo & wd, bool exportIgnore, MakeNotAllowedError e) override;
 
@@ -690,20 +697,22 @@ struct GitSourceAccessor : SourceAccessor
     struct State
     {
         ref<GitRepoImpl> repo;
-        std::string gitRev;
+        git_oid oid;
         Object root;
         std::optional<lfs::Fetch> lfsFetch = std::nullopt;
+        bool applyFilters;
     };
 
     Sync<State> state_;
 
-    GitSourceAccessor(ref<GitRepoImpl> repo_, const Hash & rev, bool smudgeLfs)
+    GitSourceAccessor(ref<GitRepoImpl> repo_, const Hash & rev, bool smudgeLfs, bool applyFilters_)
         : state_{
                 State {
                     .repo = repo_,
-                    .gitRev = rev.gitRev(),
+                    .oid = hashToOID(rev),
                     .root = peelToTreeOrBlob(lookupObject(*repo_, hashToOID(rev)).get()),
                     .lfsFetch = smudgeLfs ? std::make_optional(lfs::Fetch(*repo_, hashToOID(rev))) : std::nullopt,
+                    .applyFilters = applyFilters_,
                 }
             }
     {
@@ -732,28 +741,28 @@ struct GitSourceAccessor : SourceAccessor
             }
         }
 
-        // Apply git filters including CRLF conversion
-        git_buf filtered = GIT_BUF_INIT;
-        git_blob_filter_options opts = GIT_BLOB_FILTER_OPTIONS_INIT;
+        if (!state->applyFilters)
+            return std::string((const char *) git_blob_rawcontent(blob.get()), git_blob_rawsize(blob.get()));
+        else {
+            // Apply git filters including potential CRLF conversion
+            git_buf filtered = GIT_BUF_INIT;
+            git_blob_filter_options opts = GIT_BLOB_FILTER_OPTIONS_INIT;
 
-        git_oid oid;
-        if (git_oid_fromstr(&oid, state->gitRev.c_str()))
-            throw Error("cannot convert '%s' to a Git OID", state->gitRev.c_str());
+            opts.attr_commit_id = state->oid;
+            opts.flags = GIT_BLOB_FILTER_ATTRIBUTES_FROM_COMMIT;
 
-        opts.attr_commit_id = oid;
-        opts.flags = GIT_BLOB_FILTER_ATTRIBUTES_FROM_COMMIT;
-
-        int error = git_blob_filter(&filtered, blob.get(), path.rel_c_str(), &opts);
-        if (error != 0) {
-            const git_error *e = git_error_last();
-            std::string errorMsg = e ? e->message : "Unknown error";
+            int error = git_blob_filter(&filtered, blob.get(), path.rel_c_str(), &opts);
+            if (error != 0) {
+                const git_error *e = git_error_last();
+                std::string errorMsg = e ? e->message : "Unknown error";
+                git_buf_dispose(&filtered);
+                throw Error("Failed to filter blob: " + errorMsg);
+            }
+            std::string result(filtered.ptr, filtered.size);
             git_buf_dispose(&filtered);
-            throw Error("Failed to filter blob: " + errorMsg);
-        }
-        std::string result(filtered.ptr, filtered.size);
-        git_buf_dispose(&filtered);
 
-        return result;
+            return result;
+        }
     }
 
     std::string readFile(const CanonPath & path) override
@@ -1255,17 +1264,24 @@ struct GitFileSystemObjectSinkImpl : GitFileSystemObjectSink
     }
 };
 
-ref<GitSourceAccessor> GitRepoImpl::getRawAccessor(const Hash & rev, bool smudgeLfs)
+ref<GitSourceAccessor> GitRepoImpl::getRawAccessor(
+    const Hash & rev,
+    bool smudgeLfs,
+    bool applyFilters)
 {
     auto self = ref<GitRepoImpl>(shared_from_this());
-    return make_ref<GitSourceAccessor>(self, rev, smudgeLfs);
+    return make_ref<GitSourceAccessor>(self, rev, smudgeLfs, applyFilters);
 }
 
-ref<SourceAccessor>
-GitRepoImpl::getAccessor(const Hash & rev, bool exportIgnore, std::string displayPrefix, bool smudgeLfs)
+ref<SourceAccessor> GitRepoImpl::getAccessor(
+    const Hash & rev,
+    bool exportIgnore,
+    std::string displayPrefix,
+    bool smudgeLfs,
+    bool applyFilters)
 {
     auto self = ref<GitRepoImpl>(shared_from_this());
-    ref<GitSourceAccessor> rawGitAccessor = getRawAccessor(rev, smudgeLfs);
+    ref<GitSourceAccessor> rawGitAccessor = getRawAccessor(rev, smudgeLfs, applyFilters);
     rawGitAccessor->setPathDisplay(std::move(displayPrefix));
     if (exportIgnore)
         return make_ref<GitExportIgnoreSourceAccessor>(self, rawGitAccessor, rev);
