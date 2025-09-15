@@ -706,6 +706,7 @@ struct GitSourceAccessor : SourceAccessor
     Sync<State> state_;
 
     GitSourceAccessor(ref<GitRepoImpl> repo_, const Hash & rev, bool smudgeLfs, bool applyFilters_)
+<<<<<<< HEAD
         : state_{
                 State {
                     .repo = repo_,
@@ -715,6 +716,15 @@ struct GitSourceAccessor : SourceAccessor
                     .applyFilters = applyFilters_,
                 }
             }
+=======
+        : state_{State{
+              .repo = repo_,
+              .oid = hashToOID(rev),
+              .root = peelToTreeOrBlob(lookupObject(*repo_, hashToOID(rev)).get()),
+              .lfsFetch = smudgeLfs ? std::make_optional(lfs::Fetch(*repo_, hashToOID(rev))) : std::nullopt,
+              .applyFilters = applyFilters_,
+          }}
+>>>>>>> 0e2e1d3af (Reformat)
     {
     }
 
@@ -753,7 +763,7 @@ struct GitSourceAccessor : SourceAccessor
 
             int error = git_blob_filter(&filtered, blob.get(), path.rel_c_str(), &opts);
             if (error != 0) {
-                const git_error *e = git_error_last();
+                const git_error * e = git_error_last();
                 std::string errorMsg = e ? e->message : "Unknown error";
                 git_buf_dispose(&filtered);
                 throw Error("Failed to filter blob: " + errorMsg);
@@ -1274,11 +1284,7 @@ ref<GitSourceAccessor> GitRepoImpl::getRawAccessor(
 }
 
 ref<SourceAccessor> GitRepoImpl::getAccessor(
-    const Hash & rev,
-    bool exportIgnore,
-    std::string displayPrefix,
-    bool smudgeLfs,
-    bool applyFilters)
+    const Hash & rev, bool exportIgnore, std::string displayPrefix, bool smudgeLfs, bool applyFilters)
 {
     auto self = ref<GitRepoImpl>(shared_from_this());
     ref<GitSourceAccessor> rawGitAccessor = getRawAccessor(rev, smudgeLfs, applyFilters);
