@@ -197,25 +197,9 @@ struct GitInputScheme : InputScheme
     StringSet allowedAttrs() const override
     {
         return {
-            "url",
-            "ref",
-            "rev",
-            "shallow",
-            "submodules",
-            "lfs",
-            "exportIgnore",
-            "lastModified",
-            "revCount",
-            "narHash",
-            "allRefs",
-            "name",
-            "dirtyRev",
-            "dirtyShortRev",
-            "verifyCommit",
-            "keytype",
-            "publicKey",
-            "publicKeys",
-            "applyFilters",
+            "url",          "ref",      "rev",       "shallow",    "submodules",   "lfs",      "exportIgnore",
+            "lastModified", "revCount", "narHash",   "allRefs",    "name",         "dirtyRev", "dirtyShortRev",
+            "verifyCommit", "keytype",  "publicKey", "publicKeys", "applyFilters",
         };
     }
 
