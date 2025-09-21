@@ -219,17 +219,17 @@ static void fetchTree(
     }
 
     auto [storePath, input2] = [&]() -> std::pair<StorePath, fetchers::Input> {
-      try {
-        return input.fetchToStore(state.store);
-      } catch (Error & e) {
-        if (!input.supportsLegacyFetch()) {
-          throw;
+        try {
+            return input.fetchToStore(state.store);
+        } catch (Error & e) {
+            if (!input.supportsLegacyFetch()) {
+                throw;
+            }
+            debug("fetching input '%s' failed (will retry in legacy mode): %s", input.to_string(), e.what());
+            // retry fetching with legacy mode enabled
+            input.attrs.insert_or_assign("__legacy", Explicit<bool>(true));
+            return input.fetchToStore(state.store);
         }
-        debug("fetching input '%s' failed (will retry in legacy mode): %s", input.to_string(), e.what());
-        // retry fetching with legacy mode enabled
-        input.attrs.insert_or_assign("__legacy", Explicit<bool>(true));
-        return input.fetchToStore(state.store);
-      }
     }();
 
     state.allowPath(storePath);

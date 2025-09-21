@@ -506,10 +506,7 @@ struct GitRepoImpl : GitRepo, std::enable_shared_from_this<GitRepoImpl>
     /**
      * A 'GitSourceAccessor' with no regard for export-ignore or any other transformations.
      */
-    ref<GitSourceAccessor> getRawAccessor(
-        const Hash & rev,
-        bool smudgeLfs = false,
-        bool applyFilters = false);
+    ref<GitSourceAccessor> getRawAccessor(const Hash & rev, bool smudgeLfs = false, bool applyFilters = false);
 
     ref<SourceAccessor> getAccessor(
         const Hash & rev,
@@ -692,17 +689,6 @@ struct GitSourceAccessor : SourceAccessor
     Sync<State> state_;
 
     GitSourceAccessor(ref<GitRepoImpl> repo_, const Hash & rev, bool smudgeLfs, bool applyFilters_)
-<<<<<<< HEAD
-        : state_{
-                State {
-                    .repo = repo_,
-                    .oid = hashToOID(rev),
-                    .root = peelToTreeOrBlob(lookupObject(*repo_, hashToOID(rev)).get()),
-                    .lfsFetch = smudgeLfs ? std::make_optional(lfs::Fetch(*repo_, hashToOID(rev))) : std::nullopt,
-                    .applyFilters = applyFilters_,
-                }
-            }
-=======
         : state_{State{
               .repo = repo_,
               .oid = hashToOID(rev),
@@ -710,7 +696,7 @@ struct GitSourceAccessor : SourceAccessor
               .lfsFetch = smudgeLfs ? std::make_optional(lfs::Fetch(*repo_, hashToOID(rev))) : std::nullopt,
               .applyFilters = applyFilters_,
           }}
->>>>>>> 0e2e1d3af (Reformat)
+
     {
     }
 
@@ -1260,10 +1246,7 @@ struct GitFileSystemObjectSinkImpl : GitFileSystemObjectSink
     }
 };
 
-ref<GitSourceAccessor> GitRepoImpl::getRawAccessor(
-    const Hash & rev,
-    bool smudgeLfs,
-    bool applyFilters)
+ref<GitSourceAccessor> GitRepoImpl::getRawAccessor(const Hash & rev, bool smudgeLfs, bool applyFilters)
 {
     auto self = ref<GitRepoImpl>(shared_from_this());
     return make_ref<GitSourceAccessor>(self, rev, smudgeLfs, applyFilters);
