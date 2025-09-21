@@ -428,7 +428,7 @@ struct GitInputScheme : InputScheme
 
     bool getApplyFiltersAttr(const Input & input) const
     {
-        return maybeGetBoolAttr(input.attrs, "applyFilters").value_or(false);
+        return maybeGetBoolAttr(input.attrs, "applyFilters").value_or(maybeGetBoolAttr(input.attrs, "__legacy").value_or(false));
     }
 
     RepoInfo getRepoInfo(const Input & input) const
@@ -909,6 +909,10 @@ struct GitInputScheme : InputScheme
     {
         auto rev = input.getRev();
         return rev && rev != nullRev;
+    }
+
+    bool supportsLegacyFetch() const override {
+        return true;
     }
 };
 

@@ -72,6 +72,7 @@ struct PathInputScheme : InputScheme
         query.erase("path");
         query.erase("type");
         query.erase("__final");
+        query.erase("__legacy");
         return ParsedURL{
             .scheme = "path",
             .path = getStrAttr(input.attrs, "path"),

@@ -218,7 +218,19 @@ static void fetchTree(
             throw Error("input '%s' is not allowed to use the '__final' attribute", input.to_string());
     }
 
-    auto [storePath, input2] = input.fetchToStore(state.store);
+    auto [storePath, input2] = [&]() -> std::pair<StorePath, fetchers::Input> {
+      try {
+        return input.fetchToStore(state.store);
+      } catch (Error & e) {
+        if (!input.supportsLegacyFetch()) {
+          throw;
+        }
+        debug("fetching input '%s' failed (will retry in legacy mode): %s", input.to_string(), e.what());
+        // retry fetching with legacy mode enabled
+        input.attrs.insert_or_assign("__legacy", Explicit<bool>(true));
+        return input.fetchToStore(state.store);
+      }
+    }();
 
     state.allowPath(storePath);
 
