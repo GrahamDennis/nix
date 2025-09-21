@@ -462,6 +462,12 @@ std::optional<time_t> Input::getLastModified() const
     return {};
 }
 
+bool Input::supportsLegacyFetch() const
+{
+    assert(scheme);
+    return scheme->supportsLegacyFetch();
+}
+
 ParsedURL InputScheme::toURL(const Input & input) const
 {
     throw Error("don't know how to convert input '%s' to a URL", attrsToJSON(input.attrs));

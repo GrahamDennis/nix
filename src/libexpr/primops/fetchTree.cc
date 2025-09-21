@@ -219,11 +219,25 @@ static void fetchTree(
             throw Error("input '%s' is not allowed to use the '__final' attribute", input.to_string());
     }
 
-    auto cachedInput = state.inputCache->getAccessor(state.store, input, fetchers::UseRegistries::No);
+    auto [storePath, input2] = [&]() -> std::pair<StorePath, fetchers::Input> {
+      try {
+	auto cachedInput = state.inputCache->getAccessor(state.store, input, fetchers::UseRegistries::No);
 
-    auto storePath = state.mountInput(cachedInput.lockedInput, input, cachedInput.accessor);
+   	auto storePath = state.mountInput(cachedInput.lockedInput, input, cachedInput.accessor);
 
-    emitTreeAttrs(state, storePath, cachedInput.lockedInput, v, params.emptyRevFallback, false);
+        return [storePath, cachedInput];
+      } catch (Error & e) {
+        if (!input.supportsLegacyFetch()) {
+          throw;
+        }
+        debug("fetching input '%s' failed (will retry in legacy mode): %s", input.to_string(), e.what());
+        // retry fetching with legacy mode enabled
+        input.attrs.insert_or_assign("__legacy", Explicit<bool>(true));
+        return input.fetchToStore(state.store);
+      }
+    }();
+
+    emitTreeAttrs(state, storePath, input2, v, params.emptyRevFallback, false);
 }
 
 static void prim_fetchTree(EvalState & state, const PosIdx pos, Value ** args, Value & v)
