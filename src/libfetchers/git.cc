@@ -57,13 +57,12 @@ Path getCachePath(std::string_view key, bool shallow)
 //   ...
 std::optional<std::string> readHead(const Path & path)
 {
-    auto [status, output] = runProgram(
-        RunOptions{
-            .program = "git",
-            // FIXME: use 'HEAD' to avoid returning all refs
-            .args = {"ls-remote", "--symref", path},
-            .isInteractive = true,
-        });
+    auto [status, output] = runProgram(RunOptions{
+        .program = "git",
+        // FIXME: use 'HEAD' to avoid returning all refs
+        .args = {"ls-remote", "--symref", path},
+        .isInteractive = true,
+    });
     if (status != 0)
         return std::nullopt;
 
@@ -179,8 +178,10 @@ struct GitInputScheme : InputScheme
         for (auto & [name, value] : url.query) {
             if (name == "rev" || name == "ref" || name == "keytype" || name == "publicKey" || name == "publicKeys")
                 attrs.emplace(name, value);
-            else if (name == "shallow" || name == "submodules" || name == "lfs" || name == "exportIgnore" || name == "allRefs" || name == "verifyCommit" || name == "applyFilters")
-                attrs.emplace(name, Explicit<bool> { value == "1" });
+            else if (
+                name == "shallow" || name == "submodules" || name == "lfs" || name == "exportIgnore"
+                || name == "allRefs" || name == "verifyCommit" || name == "applyFilters")
+                attrs.emplace(name, Explicit<bool>{value == "1"});
             else
                 url2.query.emplace(name, value);
         }
@@ -306,18 +307,17 @@ struct GitInputScheme : InputScheme
 
         writeFile(*repoPath / path.rel(), contents);
 
-        auto result = runProgram(
-            RunOptions{
-                .program = "git",
-                .args =
-                    {"-C",
-                     repoPath->string(),
-                     "--git-dir",
-                     repoInfo.gitDir,
-                     "check-ignore",
-                     "--quiet",
-                     std::string(path.rel())},
-            });
+        auto result = runProgram(RunOptions{
+            .program = "git",
+            .args =
+                {"-C",
+                 repoPath->string(),
+                 "--git-dir",
+                 repoInfo.gitDir,
+                 "check-ignore",
+                 "--quiet",
+                 std::string(path.rel())},
+        });
         auto exitCode =
 #ifndef WIN32 // TODO abstract over exit status handling on Windows
             WEXITSTATUS(result.first)
@@ -427,7 +427,8 @@ struct GitInputScheme : InputScheme
 
     bool getApplyFiltersAttr(const Input & input) const
     {
-        return maybeGetBoolAttr(input.attrs, "applyFilters").value_or(maybeGetBoolAttr(input.attrs, "__legacy").value_or(false));
+        return maybeGetBoolAttr(input.attrs, "applyFilters")
+            .value_or(maybeGetBoolAttr(input.attrs, "__legacy").value_or(false));
     }
 
     RepoInfo getRepoInfo(const Input & input) const
@@ -772,11 +773,11 @@ struct GitInputScheme : InputScheme
                     }
                 }
                 attrs.insert_or_assign("rev", submoduleRev.gitRev());
-                attrs.insert_or_assign("exportIgnore", Explicit<bool>{ exportIgnore });
-                attrs.insert_or_assign("applyFilters", Explicit<bool>{ applyFilters });
-                attrs.insert_or_assign("submodules", Explicit<bool>{ true });
-                attrs.insert_or_assign("lfs", Explicit<bool>{ smudgeLfs });
-                attrs.insert_or_assign("allRefs", Explicit<bool>{ true });
+                attrs.insert_or_assign("exportIgnore", Explicit<bool>{exportIgnore});
+                attrs.insert_or_assign("applyFilters", Explicit<bool>{applyFilters});
+                attrs.insert_or_assign("submodules", Explicit<bool>{true});
+                attrs.insert_or_assign("lfs", Explicit<bool>{smudgeLfs});
+                attrs.insert_or_assign("allRefs", Explicit<bool>{true});
                 auto submoduleInput = fetchers::Input::fromAttrs(*input.settings, std::move(attrs));
                 auto [submoduleAccessor, submoduleInput2] = submoduleInput.getAccessor(store);
                 submoduleAccessor->setPathDisplay("«" + submoduleInput.to_string() + "»");
@@ -906,9 +907,9 @@ struct GitInputScheme : InputScheme
 
     std::optional<std::string> getFingerprint(ref<Store> store, const Input & input) const override
     {
-        auto makeFingerprint = [&](const Hash & rev)
-        {
-            return rev.gitRev() + (getSubmodulesAttr(input) ? ";s" : "") + (getExportIgnoreAttr(input) ? ";e" : "") + (getLfsAttr(input) ? ";l" : "") + (getApplyFiltersAttr(input) ? ";f" : "");
+        auto makeFingerprint = [&](const Hash & rev) {
+            return rev.gitRev() + (getSubmodulesAttr(input) ? ";s" : "") + (getExportIgnoreAttr(input) ? ";e" : "")
+                   + (getLfsAttr(input) ? ";l" : "") + (getApplyFiltersAttr(input) ? ";f" : "");
         };
 
         if (auto rev = input.getRev())
@@ -941,7 +942,8 @@ struct GitInputScheme : InputScheme
         return rev && rev != nullRev;
     }
 
-    bool supportsLegacyFetch() const override {
+    bool supportsLegacyFetch() const override
+    {
         return true;
     }
 };
