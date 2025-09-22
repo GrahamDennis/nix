@@ -221,6 +221,10 @@ static void fetchTree(
 
     auto [storePath, input2] = [&]() -> std::pair<StorePath, fetchers::Input> {
         try {
+            if (state.settings.useLegacyNarBehaviour && inputs.supportsLegacyFetch()) {
+                // enable legacy mode
+                input.attrs.insert_or_assign("__legacy", Explicit<bool>(true));
+            }
             auto cachedInput = state.inputCache->getAccessor(state.store, input, fetchers::UseRegistries::No);
 
             auto storePath = state.mountInput(cachedInput.lockedInput, input, cachedInput.accessor);
@@ -230,9 +234,17 @@ static void fetchTree(
             if (!input.supportsLegacyFetch()) {
                 throw;
             }
-            debug("fetching input '%s' failed (will retry in legacy mode): %s", input.to_string(), e.what());
-            // retry fetching with legacy mode enabled
-            input.attrs.insert_or_assign("__legacy", Explicit<bool>(true));
+            debug(
+                "fetching input '%s' failed (will retry in %s mode): %s",
+                input.to_string(),
+                state.settings.useLegacyNarBehaviour ? "modern" : "legacy",
+                e.what());
+            // retry fetching in the opposite mode
+            if (state.settings.useLegacyNarBehaviour) {
+                input.attrs.erase("__legacy");
+            } else {
+                input.attrs.insert_or_assign("__legacy", Explicit<bool>(true));
+            }
             return input.fetchToStore(state.store);
         }
     }();

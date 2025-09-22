@@ -1443,6 +1443,19 @@ public:
         //        Current system: 'aarch64-darwin' with features {apple-virt, benchmark, big-parallel, nixos-test}
         // Xp::ExternalBuilders
     };
+
+    Setting<bool> useLegacyNarBehaviour{
+        this,
+        false,
+        "use-legacy-nar-behaviour",
+        R"(
+          If set to `false` (default), `.gitattributes` files in git repos will be
+          ignored by `fetchTree` for git repositories. This is the behaviour of nix
+          versions >= 2.20.
+
+          If set to `true`, `.gitattributes` files in git repos will be respected
+          by the git fetcher. This is the behaviour of nix versions < 2.20.
+        )"};
 };
 
 // FIXME: don't use a global variable.
