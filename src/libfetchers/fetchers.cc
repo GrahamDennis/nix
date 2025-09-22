@@ -196,7 +196,7 @@ std::pair<StorePath, Input> Input::fetchToStore(ref<Store> store) const
     if (!scheme)
         throw Error("cannot fetch unsupported input '%s'", attrsToJSON(toAttrs()));
 
-    auto fetch = [&]() -> std::pair<StorePath, Input> {
+    auto [storePath, input] = [&]() -> std::pair<StorePath, Input> {
         try {
             auto [accessor, result] = getAccessorUnchecked(store);
 
@@ -215,14 +215,6 @@ std::pair<StorePath, Input> Input::fetchToStore(ref<Store> store) const
             return {storePath, result};
         } catch (Error & e) {
             e.addTrace({}, "while fetching the input '%s'", to_string());
-            throw;
-        }
-    };
-
-    auto [storePath, input] = [&]() -> std::pair<StorePath, fetchers::Input> {
-        try {
-            return fetch();
-        } catch (Error & e) {
             if (!supportsLegacyFetch() || maybeGetBoolAttr(attrs, "__legacy").value_or(false)) {
                 throw;
             }
