@@ -1372,6 +1372,19 @@ public:
           Default is 0, which disables the warning.
           Set it to 1 to warn on all paths.
         )"};
+
+    Setting<bool> useLegacyNarBehaviour{
+        this,
+        false,
+        "use-legacy-nar-behaviour",
+        R"(
+          If set to `false` (default), `.gitattributes` files in git repos will be
+          ignored by `fetchTree` for git repositories. This is the behaviour of nix
+          versions >= 2.20.
+
+          If set to `true`, `.gitattributes` files in git repos will be respected
+          by the git fetcher. This is the behaviour of nix versions < 2.20.
+        )"};
 };
 
 // FIXME: don't use a global variable.
