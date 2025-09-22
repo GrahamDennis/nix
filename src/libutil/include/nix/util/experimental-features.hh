@@ -37,6 +37,7 @@ enum struct ExperimentalFeature {
     VerifiedFetches,
     PipeOperators,
     BLAKE3Hashes,
+    LegacyNarBehaviour,
 };
 
 /**
