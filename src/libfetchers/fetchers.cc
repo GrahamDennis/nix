@@ -303,6 +303,7 @@ std::pair<ref<SourceAccessor>, Input> Input::getAccessor(ref<Store> store) const
     try {
         if (experimentalFeatureSettings.isEnabled(Xp::LegacyNarBehaviour) && supportsLegacyFetch()
             && !maybeGetBoolAttr(attrs, "__legacy").value_or(false)) {
+            // fetch in legacy mode
             auto attrs2(attrs);
             attrs2.insert_or_assign("__legacy", Explicit<bool>(true));
             auto input2 = fetchers::Input::fromAttrs(*settings, std::move(attrs2));
