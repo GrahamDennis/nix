@@ -707,7 +707,6 @@ struct GitSourceAccessor : SourceAccessor
               .lfsFetch = smudgeLfs ? std::make_optional(lfs::Fetch(*repo_, hashToOID(rev))) : std::nullopt,
               .applyFilters = applyFilters_,
           }}
-
     {
     }
 
