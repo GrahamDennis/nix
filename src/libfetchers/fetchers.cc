@@ -101,7 +101,7 @@ Input Input::fromAttrs(const Settings & settings, Attrs && attrs)
     auto allowedAttrs = inputScheme->allowedAttrs();
 
     for (auto & [name, _] : attrs)
-        if (name != "type" && name != "__final" && allowedAttrs.count(name) == 0)
+        if (name != "type" && name != "__final" && name != "__legacy" && allowedAttrs.count(name) == 0)
             throw Error("input attribute '%s' not supported by scheme '%s'", name, schemeName);
 
     auto res = inputScheme->inputFromAttrs(settings, attrs);
@@ -196,7 +196,7 @@ std::pair<StorePath, Input> Input::fetchToStore(ref<Store> store) const
     if (!scheme)
         throw Error("cannot fetch unsupported input '%s'", attrsToJSON(toAttrs()));
 
-    auto [storePath, input] = [&]() -> std::pair<StorePath, Input> {
+    auto fetch = [&]() -> std::pair<StorePath, Input> {
         try {
             auto [accessor, result] = getAccessorUnchecked(store);
 
@@ -216,6 +216,22 @@ std::pair<StorePath, Input> Input::fetchToStore(ref<Store> store) const
         } catch (Error & e) {
             e.addTrace({}, "while fetching the input '%s'", to_string());
             throw;
+        }
+    };
+
+    auto [storePath, input] = [&]() -> std::pair<StorePath, fetchers::Input> {
+        try {
+            return fetch();
+        } catch (Error & e) {
+            if (!supportsLegacyFetch() || maybeGetBoolAttr(attrs, "__legacy").value_or(false)) {
+                throw;
+            }
+            debug("fetching input '%s' failed (will retry in legacy mode): %s", to_string(), e.what());
+            // retry fetching in legacy mode
+            auto attrs2(attrs);
+            attrs2.insert_or_assign("__legacy", Explicit<bool>(true));
+            auto input2 = fetchers::Input::fromAttrs(*settings, std::move(attrs2));
+            return input2.fetchToStore(store);
         }
     }();
 
@@ -293,6 +309,14 @@ void Input::checkLocks(Input specified, Input & result)
 std::pair<ref<SourceAccessor>, Input> Input::getAccessor(ref<Store> store) const
 {
     try {
+        if (experimentalFeatureSettings.isEnabled(Xp::LegacyNarBehaviour) && supportsLegacyFetch()
+            && !maybeGetBoolAttr(attrs, "__legacy").value_or(false)) {
+            auto attrs2(attrs);
+            attrs2.insert_or_assign("__legacy", Explicit<bool>(true));
+            auto input2 = fetchers::Input::fromAttrs(*settings, std::move(attrs2));
+            return input2.getAccessor(store);
+        }
+
         auto [accessor, result] = getAccessorUnchecked(store);
 
         result.attrs.insert_or_assign("__final", Explicit<bool>(true));

@@ -219,35 +219,9 @@ static void fetchTree(
             throw Error("input '%s' is not allowed to use the '__final' attribute", input.to_string());
     }
 
-    auto [storePath, input2] = [&]() -> std::pair<StorePath, fetchers::Input> {
-        try {
-            if (state.settings.useLegacyNarBehaviour && inputs.supportsLegacyFetch()) {
-                // enable legacy mode
-                input.attrs.insert_or_assign("__legacy", Explicit<bool>(true));
-            }
-            auto cachedInput = state.inputCache->getAccessor(state.store, input, fetchers::UseRegistries::No);
+    auto [storePath, input2] = input.fetchToStore(state.store);
 
-            auto storePath = state.mountInput(cachedInput.lockedInput, input, cachedInput.accessor);
-
-            return [ storePath, cachedInput ];
-        } catch (Error & e) {
-            if (!input.supportsLegacyFetch()) {
-                throw;
-            }
-            debug(
-                "fetching input '%s' failed (will retry in %s mode): %s",
-                input.to_string(),
-                state.settings.useLegacyNarBehaviour ? "modern" : "legacy",
-                e.what());
-            // retry fetching in the opposite mode
-            if (state.settings.useLegacyNarBehaviour) {
-                input.attrs.erase("__legacy");
-            } else {
-                input.attrs.insert_or_assign("__legacy", Explicit<bool>(true));
-            }
-            return input.fetchToStore(state.store);
-        }
-    }();
+    state.allowPath(storePath);
 
     emitTreeAttrs(state, storePath, input2, v, params.emptyRevFallback, false);
 }
