@@ -182,6 +182,10 @@ struct GitInputScheme : InputScheme
                 name == "shallow" || name == "submodules" || name == "lfs" || name == "exportIgnore"
                 || name == "allRefs" || name == "verifyCommit" || name == "applyFilters")
                 attrs.emplace(name, Explicit<bool>{value == "1"});
+            else if (
+                name == "dir"
+            )
+                /* no op */;
             else
                 url2.query.emplace(name, value);
         }
