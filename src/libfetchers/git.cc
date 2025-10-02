@@ -182,10 +182,6 @@ struct GitInputScheme : InputScheme
                 name == "shallow" || name == "submodules" || name == "lfs" || name == "exportIgnore"
                 || name == "allRefs" || name == "verifyCommit" || name == "applyFilters")
                 attrs.emplace(name, Explicit<bool>{value == "1"});
-            else if (
-                name == "dir"
-            )
-                /* no op */;
             else
                 url2.query.emplace(name, value);
         }
@@ -223,8 +219,9 @@ struct GitInputScheme : InputScheme
         Input input{settings};
         input.attrs = attrs;
         auto url = fixGitURL(getStrAttr(attrs, "url"));
-        parseURL(url);
-        input.attrs["url"] = url;
+        auto parsedURL = parseURL(url);
+        parsedURL.query.erase("dir");
+        input.attrs["url"] = parsedURL.to_string();
         getShallowAttr(input);
         getSubmodulesAttr(input);
         getAllRefsAttr(input);
