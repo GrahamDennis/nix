@@ -2,10 +2,10 @@ version: 2.1
 executors:
   nix-x86-64:
     machine: true
-    resource_class: ccirunner-anduril/nix-x86-64
+    resource_class: ccirunner/ainix-x86
   nix-arm64:
     machine: true
-    resource_class: ccirunner-anduril/nix-arm64
+    resource_class: ccirunner/ainix-arm
   minimal:
     docker:
       - image: 'cimg/base:stable'
