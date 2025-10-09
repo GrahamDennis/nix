@@ -20,7 +20,7 @@ jobs:
       - run:
           name: CI
           command: |
-            nix build .#
+            nix build --print-out-paths .#
   circle-all:
     executor: minimal
     steps:
