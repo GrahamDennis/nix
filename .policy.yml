@@ -1,0 +1,47 @@
+policy:
+  approval:
+    - or:
+      - documentation
+      - renovate bot
+      - repository admins
+      - approval from aus-infra
+
+approval_rules:
+  - name: documentation
+    if:
+      only_changed_files:
+        paths:
+          - "^.+\\.md$"
+    requires:
+      count: 0
+
+  - name: renovate bot
+    if:
+      from_branch:
+        pattern: "^renovate/.*$"
+      has_author_in:
+        users: ["renovate-bot"]
+    requires:
+      count: 0
+
+  - name: repository admins
+    requires:
+      count: 1
+      permissions: ["admin"]
+    options:
+      # Prevents author from approving their own PR.
+      allow_author: false
+
+      # Someone who co-authored the PR can still approve.
+      allow_non_author_contributor: true
+
+  - name: approval from aus-infra
+    requires:
+      count: 1
+      teams: ["anduril/aus-infra"]
+    options:
+      # Prevents author from approving their own PR.
+      allow_author: false
+
+      # Someone who co-authored the PR can still approve.
+      allow_non_author_contributor: true

@@ -1,0 +1,52 @@
+version: 2.1
+executors:
+  nix-x86-64:
+    machine: true
+    resource_class: ccirunner-anduril/nix-x86-64
+  nix-arm64:
+    machine: true
+    resource_class: ccirunner-anduril/nix-arm64
+  minimal:
+    docker:
+      - image: 'cimg/base:stable'
+jobs:
+  ci:
+    parameters:
+      executor:
+        type: string
+    executor: <<parameters.executor>>
+    steps:
+      - checkout
+      - run:
+          name: CI
+          command: |
+            nix build .#
+  circle-all:
+    executor: minimal
+    steps:
+      - run:
+          name: Done
+          command: |
+            echo "Success!"
+workflows:
+  version: 2
+  build:
+    jobs:
+      - ci:
+          name: ci-<<matrix.executor>>
+          matrix:
+            parameters:
+              executor:
+                - nix-x86-64
+                - nix-arm64
+          filters:
+            tags:
+              # Run on tags as well as commits
+              only: /.*/
+      - circle-all:
+          requires:
+            - ci
+          filters:
+            tags:
+              # Run on tags as well as commits
+              only: /.*/
