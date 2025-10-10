@@ -40,7 +40,7 @@ enum struct ExperimentalFeature {
     ExternalBuilders,
     BLAKE3Hashes,
     LegacyNarBehaviour,
-    ModernNoDirQueryParamInFlakeLockUrlBehaviour,
+    ModernDirQueryParam,
 };
 
 /**
