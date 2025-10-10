@@ -30,6 +30,16 @@ nlohmann::json attrsToJSON(const Attrs & attrs)
         if (auto v = std::get_if<uint64_t>(&attr.second)) {
             json[attr.first] = *v;
         } else if (auto v = std::get_if<std::string>(&attr.second)) {
+            if (attr.first == "url" && !experimentalFeatureSettings.isEnabled(Xp::ModernNoDirQueryParamInFlakeLockUrlBehaviour)) {
+                // re-insert dir query parameter for backwards-compatibility
+                auto optionalDir = maybeGetStrAttr(attrs, "dir");
+                if (optionalDir) {
+                    auto parsedURL = parseURL(*v);
+                    parsedURL.query.emplace("dir", *optionalDir);
+                    json[attr.first] = parsedURL.to_string();
+                    continue;
+                }
+            }
             json[attr.first] = *v;
         } else if (auto v = std::get_if<Explicit<bool>>(&attr.second)) {
             json[attr.first] = v->t;

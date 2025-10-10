@@ -218,10 +218,9 @@ struct GitInputScheme : InputScheme
 
         Input input{settings};
         input.attrs = attrs;
-        auto url = fixGitURL(getStrAttr(attrs, "url")).to_string();
-        auto parsedURL = parseURL(url);
-        parsedURL.query.erase("dir");
-        input.attrs["url"] = parsedURL.to_string();
+        auto url = fixGitURL(getStrAttr(attrs, "url"));
+        parseURL(url);
+        input.attrs["url"] = url;
         getShallowAttr(input);
         getSubmodulesAttr(input);
         getAllRefsAttr(input);
@@ -490,35 +489,7 @@ struct GitInputScheme : InputScheme
                    Git interprets them as part of the file name. So get
                    rid of them. */
                 url.query.clear();
-            /* Backward compatibility hack: In old versions of Nix, if you had
-               a flake input like
-
-                 inputs.foo.url = "git+https://foo/bar?dir=subdir";
-
-               it would result in a lock file entry like
-
-                 "original": {
-                   "dir": "subdir",
-                   "type": "git",
-                   "url": "https://foo/bar?dir=subdir"
-                 }
-
-               New versions of Nix remove `?dir=subdir` from the `url` field,
-               since the subdirectory is intended for `FlakeRef`, not the
-               fetcher (and specifically the remote server), that is, the
-               flakeref is parsed into
-
-                 "original": {
-                   "dir": "subdir",
-                   "type": "git",
-                   "url": "https://foo/bar"
-                 }
-
-               However, new versions of nix parsing old flake.lock files would pass the dir=
-               query parameter in the "url" attribute to git, which will then complain.
-
-               For this reason, we are filtering the `dir` query parameter from the URL
-               before passing it to git. */
+            /* Strip dir attributes from the URL if they exist, they were written by older versions of nix */
             url.query.erase("dir");
             repoInfo.location = url;
         }

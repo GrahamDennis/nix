@@ -24,7 +24,7 @@ struct ExperimentalFeatureDetails
  * feature, we either have no issue at all if few features are not added
  * at the end of the list, or a proper merge conflict if they are.
  */
-constexpr size_t numXpFeatures = 1 + static_cast<size_t>(Xp::LegacyNarBehaviour);
+constexpr size_t numXpFeatures = 1 + static_cast<size_t>(Xp::ModernNoDirQueryParamInFlakeLockUrlBehaviour);
 
 constexpr std::array<ExperimentalFeatureDetails, numXpFeatures> xpFeatureDetails = {{
     {
@@ -330,6 +330,18 @@ constexpr std::array<ExperimentalFeatureDetails, numXpFeatures> xpFeatureDetails
 
             If set to `true`, `.gitattributes` files in git repos will be respected
             by the git fetcher. This is the behaviour of nix versions < 2.20.
+        )",
+        .trackingUrl = "",
+    },
+    {
+        .tag = Xp::ModernNoDirQueryParamInFlakeLockUrlBehaviour,
+        .name = "modern-no-dir-query-param-in-flake-lock-url-behaviour",
+        .description = R"(
+            If set to `false` (default), the flake inputs in flake.lock files using the
+            `dir` query parameter will have this included in the "url" attribute.
+
+            If set to `true`, the modern behaviour will be used where this query parameter is not
+            present in the "url" attribute.
         )",
         .trackingUrl = "",
     },
