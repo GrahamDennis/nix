@@ -31,7 +31,7 @@ nlohmann::json attrsToJSON(const Attrs & attrs)
             json[attr.first] = *v;
         } else if (auto v = std::get_if<std::string>(&attr.second)) {
             if (attr.first == "url"
-                && !experimentalFeatureSettings.isEnabled(Xp::ModernNoDirQueryParamInFlakeLockUrlBehaviour)) {
+                && !experimentalFeatureSettings.isEnabled(Xp::ModernDirQueryParam)) {
                 // re-insert dir query parameter for backwards-compatibility
                 auto optionalDir = maybeGetStrAttr(attrs, "dir");
                 if (optionalDir) {
