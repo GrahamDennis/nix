@@ -38,6 +38,7 @@ enum struct ExperimentalFeature {
     PipeOperators,
     BLAKE3Hashes,
     LegacyNarBehaviour,
+    ModernNoDirQueryParamInFlakeLockUrlBehaviour,
 };
 
 /**

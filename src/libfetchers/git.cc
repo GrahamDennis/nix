@@ -219,9 +219,8 @@ struct GitInputScheme : InputScheme
         Input input{settings};
         input.attrs = attrs;
         auto url = fixGitURL(getStrAttr(attrs, "url"));
-        auto parsedURL = parseURL(url);
-        parsedURL.query.erase("dir");
-        input.attrs["url"] = parsedURL.to_string();
+        parseURL(url);
+        input.attrs["url"] = url;
         getShallowAttr(input);
         getSubmodulesAttr(input);
         getAllRefsAttr(input);
@@ -489,6 +488,8 @@ struct GitInputScheme : InputScheme
                    Git interprets them as part of the file name. So get
                    rid of them. */
                 url.query.clear();
+            /* Strip dir attributes from the URL if they exist, they were written by older versions of nix */
+            url.query.erase("dir");
             repoInfo.location = url;
         }
 
