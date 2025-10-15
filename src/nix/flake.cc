@@ -1502,6 +1502,7 @@ struct CmdFlakePrefetch : FlakeCommand, MixJSON
             res["original"] = fetchers::attrsToJSON(resolvedRef.toAttrs());
             res["locked"] = fetchers::attrsToJSON(lockedRef.toAttrs());
             res["locked"].erase("__final"); // internal for now
+            res["locked"].erase("__legacy");
             printJSON(res);
         } else {
             notice(

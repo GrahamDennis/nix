@@ -178,7 +178,7 @@ struct GitInputScheme : InputScheme
                 attrs.emplace(name, value);
             else if (
                 name == "shallow" || name == "submodules" || name == "lfs" || name == "exportIgnore"
-                || name == "allRefs" || name == "verifyCommit")
+                || name == "allRefs" || name == "verifyCommit" || name == "applyFilters")
                 attrs.emplace(name, Explicit<bool>{value == "1"});
             else
                 url2.query.emplace(name, value);
@@ -369,6 +369,10 @@ struct GitInputScheme : InputScheme
                 "publicKeys",
                 {},
             },
+            {
+                "applyFilters",
+                {},
+            },
         };
         return attrs;
     }
@@ -418,6 +422,8 @@ struct GitInputScheme : InputScheme
             url.query.insert_or_assign("publicKey", publicKeys.at(0).key);
         } else if (publicKeys.size() > 1)
             url.query.insert_or_assign("publicKeys", publicKeys_to_string(publicKeys));
+        if (maybeGetBoolAttr(input.attrs, "applyFilters").value_or(false))
+            url.query.insert_or_assign("applyFilters", "1");
         return url;
     }
 
@@ -585,12 +591,22 @@ struct GitInputScheme : InputScheme
 
     bool getExportIgnoreAttr(const Input & input) const
     {
-        return maybeGetBoolAttr(input.attrs, "exportIgnore").value_or(false);
+        // exportIgnore is not supported if submodules=true, so even if __legacy is enabled, do not enable exportIgnore
+        // if submodules is enabled.
+        bool defaultIfNotConfigured =
+            maybeGetBoolAttr(input.attrs, "__legacy").value_or(false) && !getSubmodulesAttr(input);
+        return maybeGetBoolAttr(input.attrs, "exportIgnore").value_or(defaultIfNotConfigured);
     }
 
     bool getAllRefsAttr(const Input & input) const
     {
         return maybeGetBoolAttr(input.attrs, "allRefs").value_or(false);
+    }
+
+    bool getApplyFiltersAttr(const Input & input) const
+    {
+        return maybeGetBoolAttr(input.attrs, "applyFilters")
+            .value_or(maybeGetBoolAttr(input.attrs, "__legacy").value_or(false));
     }
 
     RepoInfo getRepoInfo(const Input & input) const
@@ -649,35 +665,7 @@ struct GitInputScheme : InputScheme
                    Git interprets them as part of the file name. So get
                    rid of them. */
                 url.query.clear();
-            /* Backward compatibility hack: In old versions of Nix, if you had
-               a flake input like
-
-                 inputs.foo.url = "git+https://foo/bar?dir=subdir";
-
-               it would result in a lock file entry like
-
-                 "original": {
-                   "dir": "subdir",
-                   "type": "git",
-                   "url": "https://foo/bar?dir=subdir"
-                 }
-
-               New versions of Nix remove `?dir=subdir` from the `url` field,
-               since the subdirectory is intended for `FlakeRef`, not the
-               fetcher (and specifically the remote server), that is, the
-               flakeref is parsed into
-
-                 "original": {
-                   "dir": "subdir",
-                   "type": "git",
-                   "url": "https://foo/bar"
-                 }
-
-               However, new versions of nix parsing old flake.lock files would pass the dir=
-               query parameter in the "url" attribute to git, which will then complain.
-
-               For this reason, we are filtering the `dir` query parameter from the URL
-               before passing it to git. */
+            /* Strip dir attributes from the URL if they exist, they were written by older versions of nix */
             url.query.erase("dir");
             repoInfo.location = url;
         }
@@ -900,8 +888,9 @@ struct GitInputScheme : InputScheme
 
         bool exportIgnore = getExportIgnoreAttr(input);
         bool smudgeLfs = getLfsAttr(input);
+        bool applyFilters = getApplyFiltersAttr(input);
         auto accessor = repo->getAccessor(
-            rev, {.exportIgnore = exportIgnore, .smudgeLfs = smudgeLfs}, "«" + input.to_string() + "»");
+            rev, {.exportIgnore = exportIgnore, .smudgeLfs = smudgeLfs, .applyFilters = applyFilters}, "«" + input.to_string() + "»");
 
         /* If the repo has submodules, fetch them and return a mounted
            input accessor consisting of the accessor for the top-level
@@ -933,6 +922,7 @@ struct GitInputScheme : InputScheme
                 }
                 attrs.insert_or_assign("rev", submoduleRev.gitRev());
                 attrs.insert_or_assign("exportIgnore", Explicit<bool>{exportIgnore});
+                attrs.insert_or_assign("applyFilters", Explicit<bool>{applyFilters});
                 attrs.insert_or_assign("submodules", Explicit<bool>{true});
                 attrs.insert_or_assign("lfs", Explicit<bool>{smudgeLfs});
                 attrs.insert_or_assign("allRefs", Explicit<bool>{true});
@@ -1064,7 +1054,7 @@ struct GitInputScheme : InputScheme
     {
         auto makeFingerprint = [&](const Hash & rev) {
             return rev.gitRev() + (getSubmodulesAttr(input) ? ";s" : "") + (getExportIgnoreAttr(input) ? ";e" : "")
-                   + (getLfsAttr(input) ? ";l" : "");
+                   + (getLfsAttr(input) ? ";l" : "") + (getApplyFiltersAttr(input) ? ";f" : "");
         };
 
         if (auto rev = input.getRev())
@@ -1095,6 +1085,11 @@ struct GitInputScheme : InputScheme
     {
         auto rev = input.getRev();
         return rev && rev != nullRev;
+    }
+
+    bool supportsLegacyFetch() const override
+    {
+        return true;
     }
 };
 
