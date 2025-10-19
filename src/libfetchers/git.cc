@@ -57,13 +57,12 @@ Path getCachePath(std::string_view key, bool shallow)
 //   ...
 std::optional<std::string> readHead(const Path & path)
 {
-    auto [status, output] = runProgram(
-        RunOptions{
-            .program = "git",
-            // FIXME: use 'HEAD' to avoid returning all refs
-            .args = {"ls-remote", "--symref", path},
-            .isInteractive = true,
-        });
+    auto [status, output] = runProgram(RunOptions{
+        .program = "git",
+        // FIXME: use 'HEAD' to avoid returning all refs
+        .args = {"ls-remote", "--symref", path},
+        .isInteractive = true,
+    });
     if (status != 0)
         return std::nullopt;
 
@@ -181,7 +180,7 @@ struct GitInputScheme : InputScheme
                 attrs.emplace(name, value);
             else if (
                 name == "shallow" || name == "submodules" || name == "lfs" || name == "exportIgnore"
-                || name == "allRefs" || name == "verifyCommit")
+                || name == "allRefs" || name == "verifyCommit" || name == "applyFilters")
                 attrs.emplace(name, Explicit<bool>{value == "1"});
             else
                 url2.query.emplace(name, value);
@@ -200,24 +199,9 @@ struct GitInputScheme : InputScheme
     StringSet allowedAttrs() const override
     {
         return {
-            "url",
-            "ref",
-            "rev",
-            "shallow",
-            "submodules",
-            "lfs",
-            "exportIgnore",
-            "lastModified",
-            "revCount",
-            "narHash",
-            "allRefs",
-            "name",
-            "dirtyRev",
-            "dirtyShortRev",
-            "verifyCommit",
-            "keytype",
-            "publicKey",
-            "publicKeys",
+            "url",          "ref",      "rev",       "shallow",    "submodules",   "lfs",      "exportIgnore",
+            "lastModified", "revCount", "narHash",   "allRefs",    "name",         "dirtyRev", "dirtyShortRev",
+            "verifyCommit", "keytype",  "publicKey", "publicKeys", "applyFilters",
         };
     }
 
@@ -266,6 +250,8 @@ struct GitInputScheme : InputScheme
             url.query.insert_or_assign("publicKey", publicKeys.at(0).key);
         } else if (publicKeys.size() > 1)
             url.query.insert_or_assign("publicKeys", publicKeys_to_string(publicKeys));
+        if (maybeGetBoolAttr(input.attrs, "applyFilters").value_or(false))
+            url.query.insert_or_assign("applyFilters", "1");
         return url;
     }
 
@@ -321,18 +307,17 @@ struct GitInputScheme : InputScheme
 
         writeFile(*repoPath / path.rel(), contents);
 
-        auto result = runProgram(
-            RunOptions{
-                .program = "git",
-                .args =
-                    {"-C",
-                     repoPath->string(),
-                     "--git-dir",
-                     repoInfo.gitDir,
-                     "check-ignore",
-                     "--quiet",
-                     std::string(path.rel())},
-            });
+        auto result = runProgram(RunOptions{
+            .program = "git",
+            .args =
+                {"-C",
+                 repoPath->string(),
+                 "--git-dir",
+                 repoInfo.gitDir,
+                 "check-ignore",
+                 "--quiet",
+                 std::string(path.rel())},
+        });
         auto exitCode =
 #ifndef WIN32 // TODO abstract over exit status handling on Windows
             WEXITSTATUS(result.first)
@@ -440,6 +425,12 @@ struct GitInputScheme : InputScheme
         return maybeGetBoolAttr(input.attrs, "allRefs").value_or(false);
     }
 
+    bool getApplyFiltersAttr(const Input & input) const
+    {
+        return maybeGetBoolAttr(input.attrs, "applyFilters")
+            .value_or(maybeGetBoolAttr(input.attrs, "__legacy").value_or(false));
+    }
+
     RepoInfo getRepoInfo(const Input & input) const
     {
         auto checkHashAlgorithm = [&](const std::optional<Hash> & hash) {
@@ -496,35 +487,7 @@ struct GitInputScheme : InputScheme
                    Git interprets them as part of the file name. So get
                    rid of them. */
                 url.query.clear();
-            /* Backward compatibility hack: In old versions of Nix, if you had
-               a flake input like
-
-                 inputs.foo.url = "git+https://foo/bar?dir=subdir";
-
-               it would result in a lock file entry like
-
-                 "original": {
-                   "dir": "subdir",
-                   "type": "git",
-                   "url": "https://foo/bar?dir=subdir"
-                 }
-
-               New versions of Nix remove `?dir=subdir` from the `url` field,
-               since the subdirectory is intended for `FlakeRef`, not the
-               fetcher (and specifically the remote server), that is, the
-               flakeref is parsed into
-
-                 "original": {
-                   "dir": "subdir",
-                   "type": "git",
-                   "url": "https://foo/bar"
-                 }
-
-               However, new versions of nix parsing old flake.lock files would pass the dir=
-               query parameter in the "url" attribute to git, which will then complain.
-
-               For this reason, we are filtering the `dir` query parameter from the URL
-               before passing it to git. */
+            /* Strip dir attributes from the URL if they exist, they were written by older versions of nix */
             url.query.erase("dir");
             repoInfo.location = url;
         }
@@ -750,7 +713,8 @@ struct GitInputScheme : InputScheme
 
         bool exportIgnore = getExportIgnoreAttr(input);
         bool smudgeLfs = getLfsAttr(input);
-        auto accessor = repo->getAccessor(rev, exportIgnore, "«" + input.to_string() + "»", smudgeLfs);
+        bool applyFilters = getApplyFiltersAttr(input);
+        auto accessor = repo->getAccessor(rev, exportIgnore, "«" + input.to_string() + "»", smudgeLfs, applyFilters);
 
         /* If the repo has submodules, fetch them and return a mounted
            input accessor consisting of the accessor for the top-level
@@ -782,6 +746,7 @@ struct GitInputScheme : InputScheme
                 }
                 attrs.insert_or_assign("rev", submoduleRev.gitRev());
                 attrs.insert_or_assign("exportIgnore", Explicit<bool>{exportIgnore});
+                attrs.insert_or_assign("applyFilters", Explicit<bool>{applyFilters});
                 attrs.insert_or_assign("submodules", Explicit<bool>{true});
                 attrs.insert_or_assign("lfs", Explicit<bool>{smudgeLfs});
                 attrs.insert_or_assign("allRefs", Explicit<bool>{true});
@@ -916,7 +881,7 @@ struct GitInputScheme : InputScheme
     {
         auto makeFingerprint = [&](const Hash & rev) {
             return rev.gitRev() + (getSubmodulesAttr(input) ? ";s" : "") + (getExportIgnoreAttr(input) ? ";e" : "")
-                   + (getLfsAttr(input) ? ";l" : "");
+                   + (getLfsAttr(input) ? ";l" : "") + (getApplyFiltersAttr(input) ? ";f" : "");
         };
 
         if (auto rev = input.getRev())
@@ -947,6 +912,11 @@ struct GitInputScheme : InputScheme
     {
         auto rev = input.getRev();
         return rev && rev != nullRev;
+    }
+
+    bool supportsLegacyFetch() const override
+    {
+        return true;
     }
 };
 
