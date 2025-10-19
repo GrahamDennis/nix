@@ -314,8 +314,8 @@ nix eval --impure --expr "let attrs = builtins.fetchGit $empty; in assert attrs.
 # Test a repo with `eol=crlf`.
 repo="$TEST_ROOT/crlf"
 git init "$repo"
-git -C $repo config user.email "foobar@example.com"
-git -C $repo config user.name "Foobar"
+git -C "$repo" config user.email "foobar@example.com"
+git -C "$repo" config user.name "Foobar"
 
 echo -n -e 'foo\nbar\nbaz' > "$repo/newlines.txt"
 echo -n -e 'foo\nbar\nbaz' > "$repo/test.txt"
@@ -332,7 +332,7 @@ narhash=$(nix eval --raw --impure --expr "(builtins.fetchGit { url = \"$repo\"; 
 
 
 # Ensure that NAR hash doesn't depend on user configuration.
-rm -rf $TEST_HOME/.cache/nix
+rm -rf "$TEST_HOME/.cache/nix"
 export GIT_CONFIG_GLOBAL="$TEST_ROOT/gitconfig"
 git config --global core.autocrlf true
 narhash=$(nix eval --raw --impure --expr "(builtins.fetchGit { url = \"$repo\"; ref = \"master\"; }).narHash")
