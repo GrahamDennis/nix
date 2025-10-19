@@ -12,6 +12,7 @@
 
 #include <git2/attr.h>
 #include <git2/blob.h>
+#include <git2/branch.h>
 #include <git2/commit.h>
 #include <git2/config.h>
 #include <git2/describe.h>
@@ -28,6 +29,7 @@
 #include <git2/submodule.h>
 #include <git2/sys/odb_backend.h>
 #include <git2/sys/mempack.h>
+#include <git2/tag.h>
 #include <git2/tree.h>
 
 #include <boost/unordered/unordered_flat_map.hpp>
@@ -507,10 +509,14 @@ struct GitRepoImpl : GitRepo, std::enable_shared_from_this<GitRepoImpl>
     /**
      * A 'GitSourceAccessor' with no regard for export-ignore or any other transformations.
      */
-    ref<GitSourceAccessor> getRawAccessor(const Hash & rev, bool smudgeLfs = false);
+    ref<GitSourceAccessor> getRawAccessor(const Hash & rev, bool smudgeLfs = false, bool applyFilters = false);
 
-    ref<SourceAccessor>
-    getAccessor(const Hash & rev, bool exportIgnore, std::string displayPrefix, bool smudgeLfs = false) override;
+    ref<SourceAccessor> getAccessor(
+        const Hash & rev,
+        bool exportIgnore,
+        std::string displayPrefix,
+        bool smudgeLfs = false,
+        bool applyFilters = false) override;
 
     ref<SourceAccessor> getAccessor(const WorkdirInfo & wd, bool exportIgnore, MakeNotAllowedError e) override;
 
@@ -688,17 +694,21 @@ struct GitSourceAccessor : SourceAccessor
     struct State
     {
         ref<GitRepoImpl> repo;
+        git_oid oid;
         Object root;
         std::optional<lfs::Fetch> lfsFetch = std::nullopt;
+        bool applyFilters;
     };
 
     Sync<State> state_;
 
-    GitSourceAccessor(ref<GitRepoImpl> repo_, const Hash & rev, bool smudgeLfs)
+    GitSourceAccessor(ref<GitRepoImpl> repo_, const Hash & rev, bool smudgeLfs, bool applyFilters_)
         : state_{State{
               .repo = repo_,
+              .oid = hashToOID(rev),
               .root = peelToTreeOrBlob(lookupObject(*repo_, hashToOID(rev)).get()),
               .lfsFetch = smudgeLfs ? std::make_optional(lfs::Fetch(*repo_, hashToOID(rev))) : std::nullopt,
+              .applyFilters = applyFilters_,
           }}
     {
     }
@@ -726,7 +736,28 @@ struct GitSourceAccessor : SourceAccessor
             }
         }
 
-        return std::string((const char *) git_blob_rawcontent(blob.get()), git_blob_rawsize(blob.get()));
+        if (!state->applyFilters)
+            return std::string((const char *) git_blob_rawcontent(blob.get()), git_blob_rawsize(blob.get()));
+        else {
+            // Apply git filters including potential CRLF conversion
+            git_buf filtered = GIT_BUF_INIT;
+            git_blob_filter_options opts = GIT_BLOB_FILTER_OPTIONS_INIT;
+
+            opts.attr_commit_id = state->oid;
+            opts.flags = GIT_BLOB_FILTER_ATTRIBUTES_FROM_COMMIT;
+
+            int error = git_blob_filter(&filtered, blob.get(), path.rel_c_str(), &opts);
+            if (error != 0) {
+                const git_error * e = git_error_last();
+                std::string errorMsg = e ? e->message : "Unknown error";
+                git_buf_dispose(&filtered);
+                throw Error("Failed to filter blob: " + errorMsg);
+            }
+            std::string result(filtered.ptr, filtered.size);
+            git_buf_dispose(&filtered);
+
+            return result;
+        }
     }
 
     std::string readFile(const CanonPath & path) override
@@ -1228,17 +1259,17 @@ struct GitFileSystemObjectSinkImpl : GitFileSystemObjectSink
     }
 };
 
-ref<GitSourceAccessor> GitRepoImpl::getRawAccessor(const Hash & rev, bool smudgeLfs)
+ref<GitSourceAccessor> GitRepoImpl::getRawAccessor(const Hash & rev, bool smudgeLfs, bool applyFilters)
 {
     auto self = ref<GitRepoImpl>(shared_from_this());
-    return make_ref<GitSourceAccessor>(self, rev, smudgeLfs);
+    return make_ref<GitSourceAccessor>(self, rev, smudgeLfs, applyFilters);
 }
 
-ref<SourceAccessor>
-GitRepoImpl::getAccessor(const Hash & rev, bool exportIgnore, std::string displayPrefix, bool smudgeLfs)
+ref<SourceAccessor> GitRepoImpl::getAccessor(
+    const Hash & rev, bool exportIgnore, std::string displayPrefix, bool smudgeLfs, bool applyFilters)
 {
     auto self = ref<GitRepoImpl>(shared_from_this());
-    ref<GitSourceAccessor> rawGitAccessor = getRawAccessor(rev, smudgeLfs);
+    ref<GitSourceAccessor> rawGitAccessor = getRawAccessor(rev, smudgeLfs, applyFilters);
     rawGitAccessor->setPathDisplay(std::move(displayPrefix));
     if (exportIgnore)
         return make_ref<GitExportIgnoreSourceAccessor>(self, rawGitAccessor, rev);
@@ -1323,55 +1354,13 @@ GitRepo::WorkdirInfo GitRepo::getCachedWorkdirInfo(const std::filesystem::path &
     return workdirInfo;
 }
 
-/**
- * Checks that the git reference is valid and normalizes slash '/' sequences.
- *
- * Accepts shorthand references (one-level refnames are allowed).
- */
-bool isValidRefNameAllowNormalizations(const std::string & refName)
-{
-    /* Unfortunately libgit2 doesn't expose the limit in headers, but its internal
-       limit is also 1024. */
-    std::array<char, 1024> normalizedRefBuffer;
-
-    /* It would be nice to have a better API like git_reference_name_is_valid, but
-     * with GIT_REFERENCE_FORMAT_REFSPEC_SHORTHAND flag. libgit2 uses it internally
-     * but doesn't expose it in public headers [1].
-     * [1]:
-     * https://github.com/libgit2/libgit2/blob/9d5f1bacc23594c2ba324c8f0d41b88bf0e9ef04/src/libgit2/refs.c#L1362-L1365
-     */
-
-    auto res = git_reference_normalize_name(
-        normalizedRefBuffer.data(),
-        normalizedRefBuffer.size(),
-        refName.c_str(),
-        GIT_REFERENCE_FORMAT_ALLOW_ONELEVEL | GIT_REFERENCE_FORMAT_REFSPEC_SHORTHAND);
-
-    return res == 0;
-}
-
 bool isLegalRefName(const std::string & refName)
 {
     initLibGit2();
 
-    /* Since `git_reference_normalize_name` is the best API libgit2 has for verifying
-     * reference names with shorthands (see comment in normalizeRefName), we need to
-     * ensure that exceptions to the validity checks imposed by normalization [1] are checked
-     * explicitly.
-     * [1]: https://git-scm.com/docs/git-check-ref-format#Documentation/git-check-ref-format.txt---normalize
-     */
-
     /* Check for cases that don't get rejected by libgit2.
      * FIXME: libgit2 should reject this. */
     if (refName == "@")
-        return false;
-
-    /* Leading slashes and consecutive slashes are stripped during normalizatiton. */
-    if (refName.starts_with('/') || refName.find("//") != refName.npos)
-        return false;
-
-    /* Refer to libgit2. */
-    if (!isValidRefNameAllowNormalizations(refName))
         return false;
 
     /* libgit2 doesn't barf on DEL symbol.
@@ -1379,7 +1368,19 @@ bool isLegalRefName(const std::string & refName)
     if (refName.find('\177') != refName.npos)
         return false;
 
-    return true;
+    for (auto * func : {
+             git_reference_name_is_valid,
+             git_branch_name_is_valid,
+             git_tag_name_is_valid,
+         }) {
+        int valid = 0;
+        if (func(&valid, refName.c_str()))
+            throw Error("checking git reference '%s': %s", refName, git_error_last()->message);
+        if (valid)
+            return true;
+    }
+
+    return false;
 }
 
 } // namespace nix

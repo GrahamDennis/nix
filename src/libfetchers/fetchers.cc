@@ -101,7 +101,7 @@ Input Input::fromAttrs(const Settings & settings, Attrs && attrs)
     auto allowedAttrs = inputScheme->allowedAttrs();
 
     for (auto & [name, _] : attrs)
-        if (name != "type" && name != "__final" && allowedAttrs.count(name) == 0)
+        if (name != "type" && name != "__final" && name != "__legacy" && allowedAttrs.count(name) == 0)
             throw Error("input attribute '%s' not supported by scheme '%s'", name, schemeName);
 
     auto res = inputScheme->inputFromAttrs(settings, attrs);
@@ -215,7 +215,15 @@ std::pair<StorePath, Input> Input::fetchToStore(ref<Store> store) const
             return {storePath, result};
         } catch (Error & e) {
             e.addTrace({}, "while fetching the input '%s'", to_string());
-            throw;
+            if (!supportsLegacyFetch() || maybeGetBoolAttr(attrs, "__legacy").value_or(false)) {
+                throw;
+            }
+            debug("fetching input '%s' failed (will retry in legacy mode): %s", to_string(), e.what());
+            // retry fetching in legacy mode
+            auto attrs2(attrs);
+            attrs2.insert_or_assign("__legacy", Explicit<bool>(true));
+            auto input2 = fetchers::Input::fromAttrs(*settings, std::move(attrs2));
+            return input2.fetchToStore(store);
         }
     }();
 
@@ -293,6 +301,15 @@ void Input::checkLocks(Input specified, Input & result)
 std::pair<ref<SourceAccessor>, Input> Input::getAccessor(ref<Store> store) const
 {
     try {
+        if (experimentalFeatureSettings.isEnabled(Xp::LegacyNarBehaviour) && supportsLegacyFetch()
+            && !maybeGetBoolAttr(attrs, "__legacy").value_or(false)) {
+            // fetch in legacy mode
+            auto attrs2(attrs);
+            attrs2.insert_or_assign("__legacy", Explicit<bool>(true));
+            auto input2 = fetchers::Input::fromAttrs(*settings, std::move(attrs2));
+            return input2.getAccessor(store);
+        }
+
         auto [accessor, result] = getAccessorUnchecked(store);
 
         result.attrs.insert_or_assign("__final", Explicit<bool>(true));
@@ -460,6 +477,12 @@ std::optional<time_t> Input::getLastModified() const
     if (auto n = maybeGetIntAttr(attrs, "lastModified"))
         return *n;
     return {};
+}
+
+bool Input::supportsLegacyFetch() const
+{
+    assert(scheme);
+    return scheme->supportsLegacyFetch();
 }
 
 ParsedURL InputScheme::toURL(const Input & input) const
