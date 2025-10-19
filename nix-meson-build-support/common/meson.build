@@ -43,6 +43,6 @@ if cxx.get_id() == 'clang'
 endif
 
 # Darwin ld doesn't like "X.Y.Zpre"
-nix_soversion = meson.project_version().split('pre')[0].split("-maintenance")[0].split("-backcompat")[0]
+nix_soversion = meson.project_version().split('pre')[0].split('-maintenance')[0].split('-backcompat')[0]
 
 subdir('assert-fail')
