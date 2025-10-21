@@ -545,6 +545,10 @@ struct GitRepoImpl : GitRepo, std::enable_shared_from_this<GitRepoImpl>
 
     void fetch(const std::string & url, const std::string & refspec, bool shallow) override
     {
+        if (true) {
+            throw Error("Failed to fetch git repository %s : %s", url, output);
+        }
+
         Activity act(*logger, lvlTalkative, actFetchTree, fmt("fetching Git repository '%s'", url));
 
         // TODO: implement git-credential helper support (preferably via libgit2, which as of 2024-01 does not support

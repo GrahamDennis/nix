@@ -196,11 +196,12 @@ std::pair<StorePath, Input> Input::fetchToStore(ref<Store> store) const
     if (!scheme)
         throw Error("cannot fetch unsupported input '%s'", attrsToJSON(toAttrs()));
 
+    if (!isFinal()) {
+        throw Error("Expected __final to be true for input '%s'", attrsToJSON(toAttrs()));
+    }
+
     auto [storePath, input] = [&]() -> std::pair<StorePath, Input> {
         try {
-            if (!isFinal()) {
-                throw Error("Expected __final to be true for input '%s'", attrsToJSON(toAttrs()));
-            }
 
             auto [accessor, result] = getAccessorUnchecked(store);
 
