@@ -198,6 +198,10 @@ std::pair<StorePath, Input> Input::fetchToStore(ref<Store> store) const
 
     auto [storePath, input] = [&]() -> std::pair<StorePath, Input> {
         try {
+            if (!isFinal()) {
+                throw Error("Expected __final to be true for input '%s'", attrsToJSON(toAttrs()));
+            }
+
             auto [accessor, result] = getAccessorUnchecked(store);
 
             auto storePath =
@@ -341,7 +345,7 @@ std::pair<ref<SourceAccessor>, Input> Input::getAccessorUnchecked(ref<Store> sto
        FIXME: substituting may be slower than fetching normally,
        e.g. for fetchers like Git that are incremental!
     */
-    if ( /*isFinal() && */ getNarHash()) {
+    if ( isFinal() && getNarHash()) {
         try {
             auto storePath = computeStorePath(*store);
 
