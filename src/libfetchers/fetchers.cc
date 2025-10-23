@@ -341,7 +341,7 @@ std::pair<ref<SourceAccessor>, Input> Input::getAccessorUnchecked(ref<Store> sto
        FIXME: substituting may be slower than fetching normally,
        e.g. for fetchers like Git that are incremental!
     */
-    if (isFinal() && getNarHash()) {
+    if ((isFinal() || !experimentalFeatureSettings.isEnabled(Xp::NoImplicitFinalFetch)) && getNarHash()) {
         try {
             auto storePath = computeStorePath(*store);
 

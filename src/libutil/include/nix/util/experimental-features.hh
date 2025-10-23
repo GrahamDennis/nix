@@ -41,6 +41,7 @@ enum struct ExperimentalFeature {
     BLAKE3Hashes,
     LegacyNarBehaviour,
     ModernDirQueryParam,
+    NoImplicitFinalFetch,
 };
 
 /**
