@@ -24,7 +24,7 @@ struct ExperimentalFeatureDetails
  * feature, we either have no issue at all if few features are not added
  * at the end of the list, or a proper merge conflict if they are.
  */
-constexpr size_t numXpFeatures = 1 + static_cast<size_t>(Xp::ModernDirQueryParam);
+constexpr size_t numXpFeatures = 1 + static_cast<size_t>(Xp::DisableImplicitFinalFetch);
 
 constexpr std::array<ExperimentalFeatureDetails, numXpFeatures> xpFeatureDetails = {{
     {
@@ -342,6 +342,18 @@ constexpr std::array<ExperimentalFeatureDetails, numXpFeatures> xpFeatureDetails
 
             If set to `true`, the modern behaviour will be used where this query parameter is not
             present in the "url" attribute.
+        )",
+        .trackingUrl = "",
+    },
+    {
+        .tag = Xp::DisableImplicitFinalFetch,
+        .name = "disable-implicit-final-fetch",
+        .description = R"(
+            If set to `false` (default), the builtins.fetch* calls will behave as though they are
+            "final" if a narHash attribute is supplied.
+
+            If set to `true`, the unpatched behaviour will be used where builtins.fetch* will behave
+            as though the inputs are not "final" (unless final is explicitly supplied and supported in the future).
         )",
         .trackingUrl = "",
     },
