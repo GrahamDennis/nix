@@ -418,8 +418,11 @@ struct GitInputScheme : InputScheme
 
     bool getExportIgnoreAttr(const Input & input) const
     {
-        return maybeGetBoolAttr(input.attrs, "exportIgnore")
-            .value_or(maybeGetBoolAttr(input.attrs, "__legacy").value_or(false));
+        // exportIgnore is not supported if submodules=true, so even if __legacy is enabled, do not enable exportIgnore
+        // if submodules is enabled.
+        bool defaultIfNotConfigured =
+            maybeGetBoolAttr(input.attrs, "__legacy").value_or(false) && !getSubmodulesAttr(input);
+        return maybeGetBoolAttr(input.attrs, "exportIgnore").value_or(defaultIfNotConfigured);
     }
 
     bool getAllRefsAttr(const Input & input) const
