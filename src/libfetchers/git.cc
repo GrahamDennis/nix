@@ -418,7 +418,8 @@ struct GitInputScheme : InputScheme
 
     bool getExportIgnoreAttr(const Input & input) const
     {
-        return maybeGetBoolAttr(input.attrs, "exportIgnore").value_or(false);
+        return maybeGetBoolAttr(input.attrs, "exportIgnore")
+            .value_or(maybeGetBoolAttr(input.attrs, "__legacy").value_or(false));
     }
 
     bool getAllRefsAttr(const Input & input) const
