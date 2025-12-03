@@ -1203,7 +1203,12 @@ StorePath LocalStore::addToStoreFromDump(
             dumpBuffer.release();
             dumpBuffer.reset((char *) tmp);
         } else {
-            printError("Raising std::bad_alloc in LocalStore::addToStoreFromDump. oldSize = %i; want = %i; oldSize + want = %i; settings.narBufferSize = %i", oldSize, want, oldSize + want, settings.narBufferSize);
+            printError(
+                "Raising std::bad_alloc in LocalStore::addToStoreFromDump. oldSize = %i; want = %i; oldSize + want = %i; settings.narBufferSize = %i",
+                oldSize,
+                want,
+                oldSize + want,
+                settings.narBufferSize);
             throw std::bad_alloc();
         }
         auto got = 0;
