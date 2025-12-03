@@ -1103,6 +1103,7 @@ void processConnection(ref<Store> store, FdSource && from, FdSink && to, Trusted
                 if (!errorAllowed)
                     throw;
             } catch (std::bad_alloc & e) {
+                printInfo("Nix daemon out of memory");
                 auto ex = Error("Nix daemon out of memory");
                 tunnelLogger->stopWork(&ex);
                 throw;

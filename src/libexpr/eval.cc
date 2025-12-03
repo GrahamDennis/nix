@@ -51,8 +51,10 @@ static char * allocString(size_t size)
 {
     char * t;
     t = (char *) GC_MALLOC_ATOMIC(size);
-    if (!t)
+    if (!t) {
+        printError("allocString returned null");
         throw std::bad_alloc();
+    }
     return t;
 }
 
