@@ -739,6 +739,13 @@ std::optional<Descriptor> DerivationBuilderImpl::startBuild()
     chownToBuilder(tmpDirFd.get(), tmpDir);
 
     for (auto & [outputName, status] : initialOutputs) {
+
+        if (status.known->path.to_string().data() == nullptr) {
+            printError("null status.known->path, has this been destroyed?");
+            printError("null status.known->path, has this been destroyed? outputName = %s", outputName);
+            throw Error("null status.known->path");
+        }
+
         /* Set scratch path we'll actually use during the build.
 
            If we're not doing a chroot build, but we have some valid
