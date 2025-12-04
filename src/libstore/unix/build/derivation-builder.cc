@@ -740,9 +740,12 @@ std::optional<Descriptor> DerivationBuilderImpl::startBuild()
 
     for (auto & [outputName, status] : initialOutputs) {
 
-        if (status.known->path.to_string().data() == nullptr) {
+        if (status.known && status.known->path.to_string().data() == nullptr) {
             printError("null status.known->path, has this been destroyed?");
-            printError("null status.known->path, has this been destroyed? outputName = %s", outputName);
+            printError(
+                "null status.known->path, has this been destroyed? outputName = %s; initialOutputs.size = %i",
+                outputName,
+                initialOutputs.size());
             throw Error("null status.known->path");
         }
 
