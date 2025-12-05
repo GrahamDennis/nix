@@ -67,7 +67,7 @@ rec {
 
       mesonComponentOverrides = lib.composeManyExtensions componentOverrides;
       # Unclear how to make Perl bindings work with a dynamically linked ASAN.
-      nix-perl-bindings = if withSanitizers then null else prev.nix-perl-bindings;
+      #nix-perl-bindings = if withSanitizers then null else prev.nix-perl-bindings;
     }
   );
 
