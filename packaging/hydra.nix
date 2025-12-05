@@ -63,9 +63,6 @@ let
         "nix-cli"
         "nix-functional-tests"
       ]
-      ++ lib.optionals enableBindings [
-        "nix-perl-bindings"
-      ]
       ++ lib.optionals enableDocs [
         "nix-manual"
         "nix-internal-api-docs"

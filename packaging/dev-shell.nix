@@ -19,7 +19,7 @@ pkgs.nixComponents2.nix-util.overrideAttrs (
         rest = builtins.substring 2 (builtins.stringLength flag) flag;
       in
       "-D${prefix}:${rest}";
-    havePerl = stdenv.buildPlatform == stdenv.hostPlatform && stdenv.hostPlatform.isUnix;
+    havePerl = false;
     ignoreCrossFile = flags: builtins.filter (flag: !(lib.strings.hasInfix "cross-file" flag)) flags;
   in
   {
@@ -86,9 +86,9 @@ pkgs.nixComponents2.nix-util.overrideAttrs (
       map (transformFlag "libutil") (ignoreCrossFile pkgs.nixComponents2.nix-util.mesonFlags)
       ++ map (transformFlag "libstore") (ignoreCrossFile pkgs.nixComponents2.nix-store.mesonFlags)
       ++ map (transformFlag "libfetchers") (ignoreCrossFile pkgs.nixComponents2.nix-fetchers.mesonFlags)
-      ++ lib.optionals havePerl (
-        map (transformFlag "perl") (ignoreCrossFile pkgs.nixComponents2.nix-perl-bindings.mesonFlags)
-      )
+      # ++ lib.optionals havePerl (
+      #   map (transformFlag "perl") (ignoreCrossFile pkgs.nixComponents2.nix-perl-bindings.mesonFlags)
+      # )
       ++ map (transformFlag "libexpr") (ignoreCrossFile pkgs.nixComponents2.nix-expr.mesonFlags)
       ++ map (transformFlag "libcmd") (ignoreCrossFile pkgs.nixComponents2.nix-cmd.mesonFlags);
 
@@ -98,7 +98,7 @@ pkgs.nixComponents2.nix-util.overrideAttrs (
       ++ pkgs.nixComponents2.nix-store.nativeBuildInputs
       ++ pkgs.nixComponents2.nix-fetchers.nativeBuildInputs
       ++ pkgs.nixComponents2.nix-expr.nativeBuildInputs
-      ++ lib.optionals havePerl pkgs.nixComponents2.nix-perl-bindings.nativeBuildInputs
+      # ++ lib.optionals havePerl pkgs.nixComponents2.nix-perl-bindings.nativeBuildInputs
       ++ lib.optionals buildCanExecuteHost pkgs.nixComponents2.nix-manual.externalNativeBuildInputs
       ++ pkgs.nixComponents2.nix-internal-api-docs.nativeBuildInputs
       ++ pkgs.nixComponents2.nix-external-api-docs.nativeBuildInputs
@@ -137,7 +137,8 @@ pkgs.nixComponents2.nix-util.overrideAttrs (
     ++ pkgs.nixComponents2.nix-expr.buildInputs
     ++ pkgs.nixComponents2.nix-expr.externalPropagatedBuildInputs
     ++ pkgs.nixComponents2.nix-cmd.buildInputs
-    ++ lib.optionals havePerl pkgs.nixComponents2.nix-perl-bindings.externalBuildInputs
-    ++ lib.optional havePerl pkgs.perl;
+    # ++ lib.optionals havePerl pkgs.nixComponents2.nix-perl-bindings.externalBuildInputs
+    # ++ lib.optional havePerl pkgs.perl
+    ;
   }
 )

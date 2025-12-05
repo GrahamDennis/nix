@@ -407,7 +407,7 @@ in
   */
   nix-external-api-docs = callPackage ../src/external-api-docs/package.nix { version = fineVersion; };
 
-  nix-perl-bindings = callPackage ../src/perl/package.nix { };
+  # nix-perl-bindings = callPackage ../src/perl/package.nix { };
 
   /**
     Combined package that has the CLI, libraries, and (assuming non-cross, no overrides) it requires that all tests succeed.

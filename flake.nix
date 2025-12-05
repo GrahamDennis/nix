@@ -237,34 +237,33 @@
                 };
               };
 
-  withSanitizers = true;
-    nixComponentsInstrumented = nixComponentsOriginal.overrideScope (
-    final: prev: let
-  enableSanitizersLayer = finalAttrs: prevAttrs: {
-    mesonFlags =
-      (prevAttrs.mesonFlags or [ ])
-      ++ [ (lib.mesonOption "b_sanitize" "address,undefined") ]
-      ++ (lib.optionals prev.originalStdenv.cc.isClang [
-        # https://www.github.com/mesonbuild/meson/issues/764
-        (lib.mesonBool "b_lundef" false)
-      ]);
-  };
-  componentOverrides = [enableSanitizersLayer];
+          withSanitizers = true;
+          nixComponentsInstrumented = nixComponentsOriginal.overrideScope (
+            final: prev:
+            let
+              enableSanitizersLayer = finalAttrs: prevAttrs: {
+                mesonFlags =
+                  (prevAttrs.mesonFlags or [ ])
+                  ++ [ (lib.mesonOption "b_sanitize" "address,undefined") ]
+                  ++ (lib.optionals prev.originalStdenv.cc.isClang [
+                    # https://www.github.com/mesonbuild/meson/issues/764
+                    (lib.mesonBool "b_lundef" false)
+                  ]);
+              };
+              componentOverrides = [ enableSanitizersLayer ];
 
-      
-    in {
-      nix-store-tests = prev.nix-store-tests.override { withBenchmarks = true; };
-      # Boehm is incompatible with ASAN.
-      nix-expr = prev.nix-expr.override { enableGC = !withSanitizers; };
+            in
+            {
+              nix-store-tests = prev.nix-store-tests.override { withBenchmarks = true; };
+              # Boehm is incompatible with ASAN.
+              nix-expr = prev.nix-expr.override { enableGC = !withSanitizers; };
 
-      mesonComponentOverrides = lib.composeManyExtensions componentOverrides;
-      # Unclear how to make Perl bindings work with a dynamically linked ASAN.
-      nix-perl-bindings = if withSanitizers then null else prev.nix-perl-bindings;
-    }
-  );
-  nixComponents = nixComponentsInstrumented;
-
-
+              mesonComponentOverrides = lib.composeManyExtensions componentOverrides;
+              # Unclear how to make Perl bindings work with a dynamically linked ASAN.
+              nix-perl-bindings = if withSanitizers then null else prev.nix-perl-bindings;
+            }
+          );
+          nixComponents = nixComponentsInstrumented;
 
           # The dependencies are in their own scope, so that they don't have to be
           # in Nixpkgs top level `pkgs` or `nixComponents2`.
@@ -442,9 +441,9 @@
                 supportsCross = false;
               };
 
-              "nix-perl-bindings" = {
-                supportsCross = false;
-              };
+              # "nix-perl-bindings" = {
+              # supportsCross = false;
+              # };
             }
             (
               pkgName:
