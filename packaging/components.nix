@@ -245,6 +245,7 @@ in
   inherit maintainers;
 
   inherit filesetToSource;
+  originalStdenv = stdenv;
 
   /**
     A user-provided extension function to apply to each component derivation.
