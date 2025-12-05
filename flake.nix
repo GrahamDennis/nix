@@ -361,7 +361,7 @@
           # Some perl dependencies are broken on i686-linux.
           # Since the support is only best-effort there, disable the perl
           # bindings
-          perlBindings = self.hydraJobs.perlBindings.${system};
+          # perlBindings = self.hydraJobs.perlBindings.${system};
         }
         # Add "passthru" tests
         //
