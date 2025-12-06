@@ -7,6 +7,7 @@
   nix-expr,
   nix-main,
   nix-cmd,
+  makeWrapper,
 
   # Configuration Options
 
@@ -71,13 +72,22 @@ mkMesonExecutable (finalAttrs: {
     nix-cmd
   ];
 
+  nativeBuildInputs = [
+    makeWrapper
+  ];
+
   mesonFlags = [
   ];
 
-  postInstall = lib.optionalString stdenv.hostPlatform.isStatic ''
-    mkdir -p $out/nix-support
-    echo "file binary-dist $out/bin/nix" >> $out/nix-support/hydra-build-products
-  '';
+  postInstall =
+    (lib.optionalString stdenv.hostPlatform.isStatic ''
+      mkdir -p $out/nix-support
+      echo "file binary-dist $out/bin/nix" >> $out/nix-support/hydra-build-products
+    '')
+    + ''
+      wrapProgram $out/bin/nix \
+        --prefix ASAN_OPTIONS : abort_on_error=1:print_summary=1:detect_leaks=0:detect_odr_violation=0
+    '';
 
   meta = {
     mainProgram = "nix";

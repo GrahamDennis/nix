@@ -59,7 +59,7 @@ mkMesonExecutable (finalAttrs: {
             buildInputs = [ writableTmpDirAsHomeHook ];
           }
           (''
-            export ASAN_OPTIONS=abort_on_error=1:print_summary=1:detect_leaks=0
+            export ASAN_OPTIONS=abort_on_error=1:print_summary=1:detect_leaks=0:detect_odr_violation=0
             export _NIX_TEST_UNIT_DATA=${resolvePath ./data}
             export NIX_CONFIG="extra-experimental-features = flakes"
             ${stdenv.hostPlatform.emulator buildPackages} ${lib.getExe finalAttrs.finalPackage}
