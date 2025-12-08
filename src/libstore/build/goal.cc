@@ -192,7 +192,7 @@ Goal::Done Goal::amDone(ExitCode result, std::optional<Error> ex)
 
 void Goal::trace(std::string_view s)
 {
-    debug("%1%: %2%", name, s);
+    printInfo("%1%: %2%", name, s);
 }
 
 void Goal::work()
