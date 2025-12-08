@@ -1,6 +1,7 @@
 #pragma once
 ///@file
 
+#include "nix/expr/config.hh"
 #include "nix/expr/print.hh"
 #include "nix/expr/eval.hh"
 #include "nix/expr/eval-error.hh"
@@ -20,8 +21,10 @@ inline void * allocBytes(size_t n)
 #else
     p = calloc(n, 1);
 #endif
-    if (!p)
+    if (!p) {
+        printError("bad_alloc from allocBytes(%d); NIX_USE_BOEHMGC = %d", n, NIX_USE_BOEHMGC);
         throw std::bad_alloc();
+    }
     return p;
 }
 
@@ -35,8 +38,10 @@ Value * EvalMemory::allocValue()
        have to explicitly clear the first word of every object we take. */
     if (!*valueAllocCache) {
         *valueAllocCache = GC_malloc_many(sizeof(Value));
-        if (!*valueAllocCache)
+        if (!*valueAllocCache) {
+            printError("bad_alloc from EvalMemory::allocValue");
             throw std::bad_alloc();
+        }
     }
 
     /* GC_NEXT is a convenience macro for accessing the first word of an object.
@@ -65,8 +70,10 @@ Env & EvalMemory::allocEnv(size_t size)
         /* see allocValue for explanations. */
         if (!*env1AllocCache) {
             *env1AllocCache = GC_malloc_many(sizeof(Env) + sizeof(Value *));
-            if (!*env1AllocCache)
+            if (!*env1AllocCache) {
+                printError("bad_alloc from EvalMemory::allocEnv(%d)", size);
                 throw std::bad_alloc();
+            }
         }
 
         void * p = *env1AllocCache;
