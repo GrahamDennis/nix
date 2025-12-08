@@ -200,6 +200,7 @@ void Goal::work()
     assert(top_co);
     assert(top_co->handle);
     assert(top_co->handle.promise().alive);
+    assert(exitCode == ecBusy);
     top_co->handle.resume();
     // We either should be in a state where we can be work()-ed again,
     // or we should be done.
