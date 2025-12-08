@@ -1,6 +1,9 @@
 #include "nix/store/build/goal.hh"
 #include "nix/store/build/worker.hh"
 #include "nix/store/globals.hh"
+#include "nix/util/logging.hh"
+#include <exception>
+#include <iostream>
 
 namespace nix {
 
@@ -89,6 +92,14 @@ void promise_type::return_value(Co && next)
     // Nor can next have a continuation, as we set it to our old one.
     assert(!continuation->handle.promise().continuation);
     continuation->handle.promise().continuation = std::move(old_continuation);
+}
+
+void promise_type::unhandled_exception()
+{
+    auto ex = std::current_exception();
+    std::cerr << "exception raised from coroutine" << std::endl;
+    std::cerr.flush();
+    throw;
 }
 
 std::coroutine_handle<> nix::Goal::Co::await_suspend(handle_type caller)
@@ -192,7 +203,7 @@ Goal::Done Goal::amDone(ExitCode result, std::optional<Error> ex)
 
 void Goal::trace(std::string_view s)
 {
-    printInfo("%1%: %2%", name, s);
+    printError("%1%: %2%", name, s);
 }
 
 void Goal::work()
