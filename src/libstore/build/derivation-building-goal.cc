@@ -705,7 +705,6 @@ Goal::Co DerivationBuildingGoal::tryToBuild()
         if (curBuilds >= settings.maxBuildJobs) {
             outputLocks.unlock();
             co_await waitForBuildSlot();
-            co_return tryToBuild();
         }
 
         if (!builder) {
@@ -777,16 +776,16 @@ Goal::Co DerivationBuildingGoal::tryToBuild()
                 *localStoreP,
                 std::make_unique<DerivationBuildingGoalCallbacks>(*this, builder),
                 DerivationBuilderParams{
-                    .drvPath = drvPath,
-                    .buildResult = buildResult,
-                    .drv = *drv,
-                    .drvOptions = *drvOptions,
-                    .inputPaths = inputPaths,
-                    .initialOutputs = initialOutputs,
-                    .buildMode = buildMode,
-                    .defaultPathsInChroot = std::move(defaultPathsInChroot),
-                    .systemFeatures = worker.store.config.systemFeatures.get(),
-                    .desugaredEnv = std::move(desugaredEnv),
+                    .drvPath = drvPath,               // reference, needs to be checked; reference to goal
+                    .buildResult = buildResult,       // reference, needs to be checked; reference to goal
+                    .drv = *drv,                      // reference, needs to be checked; reference to goal
+                    .drvOptions = *drvOptions,        // reference, needs to be checked; reference to goal
+                    .inputPaths = inputPaths,         // reference, needs to be checked; reference to goal
+                    .initialOutputs = initialOutputs, // this is the problem; reference to variables on the stack
+                    .buildMode = buildMode,           // reference, needs to be checked; reference to goal
+                    .defaultPathsInChroot = std::move(defaultPathsInChroot),    // owned map, this is OK
+                    .systemFeatures = worker.store.config.systemFeatures.get(), // owned, ok
+                    .desugaredEnv = std::move(desugaredEnv),                    // owned, ok
                 });
         }
 
