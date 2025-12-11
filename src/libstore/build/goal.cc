@@ -99,7 +99,7 @@ void promise_type::unhandled_exception()
     auto ex = std::current_exception();
     std::cerr << "exception raised from coroutine" << std::endl;
     std::cerr.flush();
-    assert(false, "unhandled exception in coroutine");
+    assert(false && "unhandled exception in coroutine");
     throw;
 }
 
