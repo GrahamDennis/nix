@@ -221,8 +221,8 @@ std::pair<StorePath, Input> Input::fetchToStore(const Settings & settings, Store
             // retry fetching in legacy mode
             auto attrs2(attrs);
             attrs2.insert_or_assign("__legacy", Explicit<bool>(true));
-            auto input2 = fetchers::Input::fromAttrs(*settings, std::move(attrs2));
-            return input2.fetchToStore(store);
+            auto input2 = fetchers::Input::fromAttrs(settings, std::move(attrs2));
+            return input2.fetchToStore(settings, store);
         }
     }();
 
@@ -305,11 +305,11 @@ std::pair<ref<SourceAccessor>, Input> Input::getAccessor(const Settings & settin
             // fetch in legacy mode
             auto attrs2(attrs);
             attrs2.insert_or_assign("__legacy", Explicit<bool>(true));
-            auto input2 = fetchers::Input::fromAttrs(*settings, std::move(attrs2));
-            return input2.getAccessor(store);
+            auto input2 = fetchers::Input::fromAttrs(settings, std::move(attrs2));
+            return input2.getAccessor(settings, store);
         }
 
-        auto [accessor, result] = getAccessorUnchecked(store);
+        auto [accessor, result] = getAccessorUnchecked(settings, store);
 
         result.attrs.insert_or_assign("__final", Explicit<bool>(true));
 

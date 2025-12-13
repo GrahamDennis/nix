@@ -768,7 +768,7 @@ struct GitSourceAccessor : SourceAccessor
             }
         }
 
-        if (!state->applyFilters)
+        if (!state->options.applyFilters)
             return std::string((const char *) git_blob_rawcontent(blob.get()), git_blob_rawsize(blob.get()));
         else {
             // Apply git filters including potential CRLF conversion
