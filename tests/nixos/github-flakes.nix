@@ -213,9 +213,7 @@ in
       cat_log()
 
       # Fetching with the resolved URL should produce the same result.
-      out2 = client.succeed(f"nix flake metadata {info['url']} --json --access-tokens github.com=ghp_000000000000000000000000000000000000 --tarball-ttl 0 --extra-experimental-features no-implicit-final-fetch")
-      print(out2)
-      info2 = json.loads(out2)
+      info2 = json.loads(client.succeed(f"nix flake metadata {info['url']} --json --access-tokens github.com=ghp_000000000000000000000000000000000000 --tarball-ttl 0"))
       print(info["fingerprint"], info2["fingerprint"])
       assert info["fingerprint"] == info2["fingerprint"], "fingerprint mismatch"
 
