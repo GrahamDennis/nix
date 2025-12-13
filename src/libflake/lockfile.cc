@@ -207,6 +207,7 @@ std::pair<nlohmann::json, LockFile::KeyMap> LockFile::toJSON() const
                anyway. */
             assert(lockedNode->lockedRef.input.isFinal() || lockedNode->lockedRef.input.isRelative());
             n["locked"].erase("__final");
+            n["locked"].erase("__legacy");
             if (!lockedNode->isFlake)
                 n["flake"] = false;
             if (lockedNode->parentInputAttrPath)

@@ -39,6 +39,9 @@ enum struct ExperimentalFeature {
     PipeOperators,
     ExternalBuilders,
     BLAKE3Hashes,
+    LegacyNarBehaviour,
+    ModernDirQueryParam,
+    NoImplicitFinalFetch,
 };
 
 /**
