@@ -726,6 +726,7 @@ struct GitSourceAccessor : SourceAccessor
     struct State
     {
         ref<GitRepoImpl> repo;
+        git_oid oid;
         Object root;
         std::optional<lfs::Fetch> lfsFetch = std::nullopt;
         GitAccessorOptions options;
@@ -736,6 +737,7 @@ struct GitSourceAccessor : SourceAccessor
     GitSourceAccessor(ref<GitRepoImpl> repo_, const Hash & rev, const GitAccessorOptions & options)
         : state_{State{
               .repo = repo_,
+              .oid = hashToOID(rev),
               .root = peelToTreeOrBlob(lookupObject(*repo_, hashToOID(rev)).get()),
               .lfsFetch = options.smudgeLfs ? std::make_optional(lfs::Fetch(*repo_, hashToOID(rev))) : std::nullopt,
               .options = options,
@@ -766,7 +768,28 @@ struct GitSourceAccessor : SourceAccessor
             }
         }
 
-        return std::string((const char *) git_blob_rawcontent(blob.get()), git_blob_rawsize(blob.get()));
+        if (!state->options.applyFilters)
+            return std::string((const char *) git_blob_rawcontent(blob.get()), git_blob_rawsize(blob.get()));
+        else {
+            // Apply git filters including potential CRLF conversion
+            git_buf filtered = GIT_BUF_INIT;
+            git_blob_filter_options opts = GIT_BLOB_FILTER_OPTIONS_INIT;
+
+            opts.attr_commit_id = state->oid;
+            opts.flags = GIT_BLOB_FILTER_ATTRIBUTES_FROM_COMMIT;
+
+            int error = git_blob_filter(&filtered, blob.get(), path.rel_c_str(), &opts);
+            if (error != 0) {
+                const git_error * e = git_error_last();
+                std::string errorMsg = e ? e->message : "Unknown error";
+                git_buf_dispose(&filtered);
+                throw Error("Failed to filter blob: " + errorMsg);
+            }
+            std::string result(filtered.ptr, filtered.size);
+            git_buf_dispose(&filtered);
+
+            return result;
+        }
     }
 
     std::string readFile(const CanonPath & path) override

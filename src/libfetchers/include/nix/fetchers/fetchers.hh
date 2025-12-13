@@ -135,6 +135,8 @@ public:
      */
     std::pair<ref<SourceAccessor>, Input> getAccessor(const Settings & settings, Store & store) const;
 
+    bool supportsLegacyFetch() const;
+
 private:
 
     std::pair<ref<SourceAccessor>, Input> getAccessorUnchecked(const Settings & settings, Store & store) const;
@@ -272,6 +274,11 @@ struct InputScheme
     getAccessToken(const fetchers::Settings & settings, const std::string & host, const std::string & url) const
     {
         return {};
+    }
+
+    virtual bool supportsLegacyFetch() const
+    {
+        return false;
     }
 };
 

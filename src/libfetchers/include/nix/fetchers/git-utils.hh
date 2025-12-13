@@ -26,6 +26,7 @@ struct GitAccessorOptions
 {
     bool exportIgnore = false;
     bool smudgeLfs = false;
+    bool applyFilters = false;
 };
 
 struct GitRepo

@@ -25,7 +25,7 @@ struct ExperimentalFeatureDetails
  * feature, we either have no issue at all if few features are not added
  * at the end of the list, or a proper merge conflict if they are.
  */
-constexpr size_t numXpFeatures = 1 + static_cast<size_t>(Xp::BLAKE3Hashes);
+constexpr size_t numXpFeatures = 1 + static_cast<size_t>(Xp::NoImplicitFinalFetch);
 
 constexpr std::array<ExperimentalFeatureDetails, numXpFeatures> xpFeatureDetails = {{
     {
@@ -318,6 +318,43 @@ constexpr std::array<ExperimentalFeatureDetails, numXpFeatures> xpFeatureDetails
         .name = "blake3-hashes",
         .description = R"(
             Enables support for BLAKE3 hashes.
+        )",
+        .trackingUrl = "",
+    },
+    {
+        .tag = Xp::LegacyNarBehaviour,
+        .name = "legacy-nar-behaviour",
+        .description = R"(
+            If set to `false` (default), `.gitattributes` files in git repos will be
+            ignored by `fetchTree` for git repositories. This is the behaviour of nix
+            versions >= 2.20.
+
+            If set to `true`, `.gitattributes` files in git repos will be respected
+            by the git fetcher. This is the behaviour of nix versions < 2.20.
+        )",
+        .trackingUrl = "",
+    },
+    {
+        .tag = Xp::ModernDirQueryParam,
+        .name = "modern-dir-query-param",
+        .description = R"(
+            If set to `false` (default), the flake inputs in flake.lock files using the
+            `dir` query parameter will have this included in the "url" attribute.
+
+            If set to `true`, the modern behaviour will be used where this query parameter is not
+            present in the "url" attribute.
+        )",
+        .trackingUrl = "",
+    },
+    {
+        .tag = Xp::NoImplicitFinalFetch,
+        .name = "no-implicit-final-fetch",
+        .description = R"(
+            If set to `false` (default), the builtins.fetch* calls will behave as though they are
+            "final" if a narHash attribute is supplied.
+
+            If set to `true`, the unpatched behaviour will be used where builtins.fetch* will behave
+            as though the inputs are not "final" (unless final is explicitly supplied and supported in the future).
         )",
         .trackingUrl = "",
     },
