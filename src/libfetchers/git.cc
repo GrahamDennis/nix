@@ -890,7 +890,9 @@ struct GitInputScheme : InputScheme
         bool smudgeLfs = getLfsAttr(input);
         bool applyFilters = getApplyFiltersAttr(input);
         auto accessor = repo->getAccessor(
-            rev, {.exportIgnore = exportIgnore, .smudgeLfs = smudgeLfs, .applyFilters = applyFilters}, "«" + input.to_string() + "»");
+            rev,
+            {.exportIgnore = exportIgnore, .smudgeLfs = smudgeLfs, .applyFilters = applyFilters},
+            "«" + input.to_string() + "»");
 
         /* If the repo has submodules, fetch them and return a mounted
            input accessor consisting of the accessor for the top-level
