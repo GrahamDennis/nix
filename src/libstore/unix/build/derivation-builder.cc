@@ -98,10 +98,13 @@ public:
     {
     }
 
-    ~DerivationBuilderImpl()
+    /**
+     * Cleanup code to run when destroying any DerivationBuilderImpl implementation.
+     */
+    void cleanupOnDestruction() noexcept
     {
         /* Careful: we should never ever throw an exception from a
-           destructor. */
+           noexcept function. */
         try {
             killChild();
         } catch (...) {
@@ -678,17 +681,17 @@ static void handleChildException(bool sendException)
     }
 }
 
-static bool checkNotWorldWritable(std::filesystem::path path)
+static void checkNotWorldWritable(std::filesystem::path path)
 {
     while (true) {
         auto st = lstat(path);
         if (st.st_mode & S_IWOTH)
-            return false;
+            throw Error("Path %s is world-writable or a symlink. That's not allowed for security.", path);
         if (path == path.parent_path())
             break;
         path = path.parent_path();
     }
-    return true;
+    return;
 }
 
 std::optional<Descriptor> DerivationBuilderImpl::startBuild()
@@ -710,9 +713,8 @@ std::optional<Descriptor> DerivationBuilderImpl::startBuild()
 
     createDirs(buildDir);
 
-    if (buildUser && !checkNotWorldWritable(buildDir))
-        throw Error(
-            "Path %s or a parent directory is world-writable or a symlink. That's not allowed for security.", buildDir);
+    if (buildUser)
+        checkNotWorldWritable(buildDir);
 
     /* Create a temporary directory where the build will take
        place. */
@@ -1963,7 +1965,20 @@ StorePath DerivationBuilderImpl::makeFallbackPath(const StorePath & path)
 
 namespace nix {
 
-std::unique_ptr<DerivationBuilder> makeDerivationBuilder(
+void DerivationBuilderDeleter::operator()(DerivationBuilder * builder) noexcept
+{
+    if (!builder) /* Idempotent and handles nullptr as any deleter must. */
+        return;
+
+    if (auto builderImpl = dynamic_cast<DerivationBuilderImpl *>(builder))
+        /* Note that this might call into virtual functions, which we can't do in a destructor of
+           the DerivationBuilderImpl itself. */
+        builderImpl->cleanupOnDestruction();
+
+    delete builder;
+}
+
+std::unique_ptr<DerivationBuilder, DerivationBuilderDeleter> makeDerivationBuilder(
     LocalStore & store, std::unique_ptr<DerivationBuilderCallbacks> miscMethods, DerivationBuilderParams params)
 {
     bool useSandbox = false;
@@ -2014,17 +2029,19 @@ std::unique_ptr<DerivationBuilder> makeDerivationBuilder(
         throw Error("feature 'uid-range' is only supported in sandboxed builds");
 
 #ifdef __APPLE__
-    return std::make_unique<DarwinDerivationBuilder>(store, std::move(miscMethods), std::move(params), useSandbox);
+    return DerivationBuilderUnique(
+        new DarwinDerivationBuilder(store, std::move(miscMethods), std::move(params), useSandbox));
 #elif defined(__linux__)
     if (useSandbox)
-        return std::make_unique<ChrootLinuxDerivationBuilder>(store, std::move(miscMethods), std::move(params));
+        return DerivationBuilderUnique(
+            new ChrootLinuxDerivationBuilder(store, std::move(miscMethods), std::move(params)));
 
-    return std::make_unique<LinuxDerivationBuilder>(store, std::move(miscMethods), std::move(params));
+    return DerivationBuilderUnique(new LinuxDerivationBuilder(store, std::move(miscMethods), std::move(params)));
 #else
     if (useSandbox)
         throw Error("sandboxing builds is not supported on this platform");
 
-    return std::make_unique<DerivationBuilderImpl>(store, std::move(miscMethods), std::move(params));
+    return DerivationBuilderUnique(new DerivationBuilderImpl(store, std::move(miscMethods), std::move(params)));
 #endif
 }
 
