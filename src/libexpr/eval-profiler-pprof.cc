@@ -352,9 +352,9 @@ class PprofProfiler : public EvalProfiler
     }
 
 public:
-    PprofProfiler(EvalState & state, const std::filesystem::path & profileFile, std::chrono::nanoseconds period)
+    PprofProfiler(EvalState & state, const std::filesystem::path & profileFile, uint32_t sampleInterval)
         : state(state)
-        , sampleInterval(period)
+        , sampleInterval(sampleInterval == 0 ? 1 : sampleInterval)
         , profilePath(profileFile)
         , posCache(state)
         , startTime(std::chrono::high_resolution_clock::now())
@@ -389,19 +389,25 @@ private:
     FrameKey makeFrameKey(const Value & v, std::span<Value *> args, PosIdx pos);
     void writeProfile();
     void writeHeapSnapshot();
+    void doSample(EvalState & state);
 
     EvalState & state;
-    std::chrono::nanoseconds sampleInterval;
+    uint32_t sampleInterval;
     std::filesystem::path profilePath;
     PprofPosCache posCache;
     std::chrono::time_point<std::chrono::high_resolution_clock> startTime;
-    std::chrono::time_point<std::chrono::high_resolution_clock> lastSample =
-        std::chrono::high_resolution_clock::now();
 
-    std::vector<FrameKey> frameStack;
-    std::vector<AllocSnapshot> allocStack;
+    struct PendingFrame {
+        const Value * v;
+        Value ** args;
+        size_t nargs;
+        PosIdx pos;
+    };
+
+    uint64_t callCounter = 0;
+    AllocSnapshot lastAllocSnapshot = {};
+    std::vector<PendingFrame> pendingStack;
     std::map<StackKey, SampleData> samples;
-    uint64_t forceDepth = 0;
     std::thread snapshotThread;
 };
 
@@ -458,49 +464,45 @@ PprofProfiler::preFunctionCallHook(EvalState & state, const Value & v, std::span
     if (heapSnapshotRequested.exchange(false, std::memory_order_acquire)) [[unlikely]]
         writeHeapSnapshot();
 
-    frameStack.push_back(makeFrameKey(v, args, pos));
-    allocStack.push_back(AllocSnapshot::capture(state.mem.getStats()));
+    pendingStack.push_back({&v, args.data(), args.size(), pos});
 
-    auto now = std::chrono::high_resolution_clock::now();
-    if (now - lastSample > sampleInterval) {
-        samples[frameStack].cpuSamples++;
-        lastSample = now;
-    }
+    if (++callCounter % sampleInterval == 0) [[unlikely]]
+        doSample(state);
+}
+
+void PprofProfiler::doSample(EvalState & state)
+{
+    auto currentAllocs = AllocSnapshot::capture(state.mem.getStats());
+    auto delta = currentAllocs - lastAllocSnapshot;
+    lastAllocSnapshot = currentAllocs;
+
+    // Resolve the pending stack to full FrameKeys
+    StackKey stack;
+    stack.reserve(pendingStack.size());
+    for (auto & pf : pendingStack)
+        stack.push_back(makeFrameKey(*pf.v, {pf.args, pf.nargs}, pf.pos));
+
+    auto & sd = samples[stack];
+    sd.cpuSamples++;
+    sd.allocObjects += delta.totalObjects();
+    sd.allocBytes += delta.totalBytes();
 }
 
 [[gnu::noinline]] void
 PprofProfiler::postFunctionCallHook(EvalState & state, const Value & v, std::span<Value *> args, const PosIdx pos)
 {
-    if (frameStack.empty())
-        return;
-
-    auto entryAllocs = allocStack.back();
-    allocStack.pop_back();
-    auto currentAllocs = AllocSnapshot::capture(state.mem.getStats());
-    auto delta = currentAllocs - entryAllocs;
-
-    auto & sd = samples[frameStack];
-    sd.allocObjects += delta.totalObjects();
-    sd.allocBytes += delta.totalBytes();
-
-    frameStack.pop_back();
+    if (!pendingStack.empty())
+        pendingStack.pop_back();
 }
 
 [[gnu::noinline]] void
 PprofProfiler::preForceValueHook(EvalState & state, Value & v, const PosIdx pos)
 {
-    forceDepth++;
 }
 
 [[gnu::noinline]] void
 PprofProfiler::postForceValueHook(EvalState & state, Value & v, const PosIdx pos)
 {
-    if (forceDepth > 0)
-        forceDepth--;
-
-    if (!frameStack.empty()) {
-        samples[frameStack].forceCount++;
-    }
 }
 
 void PprofProfiler::writeProfile()
@@ -576,11 +578,11 @@ void PprofProfiler::writeProfile()
         std::chrono::system_clock::now().time_since_epoch() - (endTime - startTime)).count();
     auto durationNanos = std::chrono::duration_cast<std::chrono::nanoseconds>(endTime - startTime).count();
 
-    // Period type and value
-    auto cpuIdx = strings.intern("cpu");
-    auto nanosecondsIdx = strings.intern("nanoseconds");
-    auto periodType = ProtobufEncoder::valueType(cpuIdx, nanosecondsIdx);
-    auto periodNanos = sampleInterval.count() > 0 ? sampleInterval.count() : 1;
+    // Period type and value (call-count sampling, expressed as "calls" unit)
+    auto callsTypeIdx = strings.intern("calls");
+    auto callsUnitIdx = strings.intern("count");
+    auto periodType = ProtobufEncoder::valueType(callsTypeIdx, callsUnitIdx);
+    int64_t periodValue = sampleInterval;
 
     // Encode the profile
     ProtobufEncoder profile;
@@ -593,7 +595,7 @@ void PprofProfiler::writeProfile()
         wallStartNanos,
         durationNanos,
         periodType,
-        periodNanos
+        periodValue
     );
 
     // Write to file
@@ -623,11 +625,8 @@ void PprofProfiler::writeHeapSnapshot()
 
     // Compute total allocated bytes across all stacks for proportional scaling
     int64_t totalAllocBytes = 0;
-    int64_t totalAllocObjects = 0;
-    for (auto & [stack, data] : samples) {
+    for (auto & [stack, data] : samples)
         totalAllocBytes += data.allocBytes;
-        totalAllocObjects += data.allocObjects;
-    }
 
     StringTable strings;
     std::map<FrameKey, uint64_t> functionIds;
@@ -744,12 +743,9 @@ PprofProfiler::~PprofProfiler()
 
 } // namespace
 
-ref<EvalProfiler> makePprofProfiler(EvalState & state, std::filesystem::path profileFile, uint64_t frequency)
+ref<EvalProfiler> makePprofProfiler(EvalState & state, std::filesystem::path profileFile, uint32_t sampleInterval)
 {
-    std::chrono::nanoseconds period = frequency == 0
-                                          ? std::chrono::nanoseconds{0}
-                                          : std::chrono::nanoseconds{std::nano::den / frequency / std::nano::num};
-    return make_ref<PprofProfiler>(state, profileFile, period);
+    return make_ref<PprofProfiler>(state, profileFile, sampleInterval);
 }
 
 } // namespace nix

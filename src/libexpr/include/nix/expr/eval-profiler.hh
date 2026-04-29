@@ -139,6 +139,6 @@ ref<EvalProfiler> makeSampleStackProfiler(EvalState & state, std::filesystem::pa
 
 ref<EvalProfiler> makeAllocationSampleStackProfiler(EvalState & state, std::filesystem::path profileFile, uint64_t frequency);
 
-ref<EvalProfiler> makePprofProfiler(EvalState & state, std::filesystem::path profileFile, uint64_t frequency);
+ref<EvalProfiler> makePprofProfiler(EvalState & state, std::filesystem::path profileFile, uint32_t sampleInterval);
 
 } // namespace nix

@@ -283,8 +283,20 @@ struct EvalSettings : Config
         99,
         "eval-profiler-frequency",
         R"(
-          Specifies the sampling rate in hertz for sampling evaluation profilers.
+          Specifies the sampling rate in hertz for the `flamegraph` profiler.
           Use `0` to sample the stack after each function call.
+          See [`eval-profiler`](#conf-eval-profiler).
+        )"};
+
+    Setting<uint32_t> evalProfilerSampleInterval{
+        this,
+        1024,
+        "eval-profiler-sample-interval",
+        R"(
+          For the `pprof` profiler, specifies how many function calls to skip
+          between samples. Higher values reduce profiling overhead at the cost
+          of resolution. Use `1` to sample every call (high overhead, maximum
+          detail). The default of 1024 gives ~2-5% overhead.
           See [`eval-profiler`](#conf-eval-profiler).
         )"};
 
