@@ -288,15 +288,15 @@ struct EvalSettings : Config
           See [`eval-profiler`](#conf-eval-profiler).
         )"};
 
-    Setting<uint32_t> evalProfilerSampleInterval{
+    Setting<uint64_t> evalProfilerAllocInterval{
         this,
-        1024,
-        "eval-profiler-sample-interval",
+        524288,
+        "eval-profiler-alloc-interval",
         R"(
-          For the `pprof` profiler, specifies how many function calls to skip
-          between samples. Higher values reduce profiling overhead at the cost
-          of resolution. Use `1` to sample every call (high overhead, maximum
-          detail). The default of 1024 gives ~2-5% overhead.
+          For the `pprof` profiler, specifies the number of bytes of allocation
+          between allocation samples. Lower values give more allocation detail
+          at higher overhead. The default of 524288 (512 KB) gives good
+          resolution with low overhead.
           See [`eval-profiler`](#conf-eval-profiler).
         )"};
 

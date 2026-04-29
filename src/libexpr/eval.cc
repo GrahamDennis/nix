@@ -392,7 +392,7 @@ EvalState::EvalState(
         break;
     case EvalProfilerMode::pprof:
         profiler.addProfiler(
-            makePprofProfiler(*this, settings.evalProfileFile.get(), settings.evalProfilerSampleInterval));
+            makePprofProfiler(*this, settings.evalProfileFile.get(), settings.evalProfilerFrequency, settings.evalProfilerAllocInterval));
         break;
     case EvalProfilerMode::disabled:
         break;

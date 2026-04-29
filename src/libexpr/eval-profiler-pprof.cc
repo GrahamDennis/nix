@@ -352,12 +352,15 @@ class PprofProfiler : public EvalProfiler
     }
 
 public:
-    PprofProfiler(EvalState & state, const std::filesystem::path & profileFile, uint32_t sampleInterval)
+    PprofProfiler(EvalState & state, const std::filesystem::path & profileFile, uint32_t cpuFrequency, uint64_t allocBytes)
         : state(state)
-        , sampleInterval(sampleInterval == 0 ? 1 : sampleInterval)
         , profilePath(profileFile)
         , posCache(state)
         , startTime(std::chrono::high_resolution_clock::now())
+        , cpuSampleInterval(cpuFrequency == 0
+            ? std::chrono::nanoseconds{0}
+            : std::chrono::nanoseconds{std::nano::den / cpuFrequency / std::nano::num})
+        , allocSampleBytes(allocBytes == 0 ? 1 : allocBytes)
     {
         Counter::enabled = true;
         auto triggerPath = profilePath.parent_path() / ".nix-heap-snapshot-trigger";
@@ -389,13 +392,16 @@ private:
     FrameKey makeFrameKey(const Value & v, std::span<Value *> args, PosIdx pos);
     void writeProfile();
     void writeHeapSnapshot();
-    void doSample(EvalState & state);
+    void doSample(EvalState & state, bool cpuSample, bool allocSample);
 
     EvalState & state;
-    uint32_t sampleInterval;
     std::filesystem::path profilePath;
     PprofPosCache posCache;
     std::chrono::time_point<std::chrono::high_resolution_clock> startTime;
+
+    // Sampling thresholds
+    std::chrono::nanoseconds cpuSampleInterval;
+    uint64_t allocSampleBytes;
 
     struct PendingFrame {
         const Value * v;
@@ -404,7 +410,9 @@ private:
         PosIdx pos;
     };
 
-    uint64_t callCounter = 0;
+    std::chrono::time_point<std::chrono::high_resolution_clock> lastCpuSample =
+        std::chrono::high_resolution_clock::now();
+    uint64_t lastAllocBytes = 0;
     AllocSnapshot lastAllocSnapshot = {};
     std::vector<PendingFrame> pendingStack;
     std::map<StackKey, SampleData> samples;
@@ -466,26 +474,44 @@ PprofProfiler::preFunctionCallHook(EvalState & state, const Value & v, std::span
 
     pendingStack.push_back({&v, args.data(), args.size(), pos});
 
-    if (++callCounter % sampleInterval == 0) [[unlikely]]
-        doSample(state);
+    bool cpuSample = false;
+    bool allocSample = false;
+
+    auto now = std::chrono::high_resolution_clock::now();
+    if (now - lastCpuSample >= cpuSampleInterval) [[unlikely]] {
+        cpuSample = true;
+        lastCpuSample = now;
+    }
+
+    auto currentAllocBytes = state.mem.getStats().nrValues.load() * sizeof(Value)
+        + state.mem.getStats().nrEnvs.load() * sizeof(Env);
+    if (currentAllocBytes - lastAllocBytes >= allocSampleBytes) [[unlikely]] {
+        allocSample = true;
+        lastAllocBytes = currentAllocBytes;
+    }
+
+    if (cpuSample || allocSample) [[unlikely]]
+        doSample(state, cpuSample, allocSample);
 }
 
-void PprofProfiler::doSample(EvalState & state)
+void PprofProfiler::doSample(EvalState & state, bool cpuSample, bool allocSample)
 {
     auto currentAllocs = AllocSnapshot::capture(state.mem.getStats());
     auto delta = currentAllocs - lastAllocSnapshot;
     lastAllocSnapshot = currentAllocs;
 
-    // Resolve the pending stack to full FrameKeys
     StackKey stack;
     stack.reserve(pendingStack.size());
     for (auto & pf : pendingStack)
         stack.push_back(makeFrameKey(*pf.v, {pf.args, pf.nargs}, pf.pos));
 
     auto & sd = samples[stack];
-    sd.cpuSamples++;
-    sd.allocObjects += delta.totalObjects();
-    sd.allocBytes += delta.totalBytes();
+    if (cpuSample)
+        sd.cpuSamples++;
+    if (allocSample) {
+        sd.allocObjects += delta.totalObjects();
+        sd.allocBytes += delta.totalBytes();
+    }
 }
 
 [[gnu::noinline]] void
@@ -578,11 +604,11 @@ void PprofProfiler::writeProfile()
         std::chrono::system_clock::now().time_since_epoch() - (endTime - startTime)).count();
     auto durationNanos = std::chrono::duration_cast<std::chrono::nanoseconds>(endTime - startTime).count();
 
-    // Period type and value (call-count sampling, expressed as "calls" unit)
-    auto callsTypeIdx = strings.intern("calls");
-    auto callsUnitIdx = strings.intern("count");
-    auto periodType = ProtobufEncoder::valueType(callsTypeIdx, callsUnitIdx);
-    int64_t periodValue = sampleInterval;
+    // Period type and value
+    auto cpuIdx = strings.intern("cpu");
+    auto nanosecondsIdx = strings.intern("nanoseconds");
+    auto periodType = ProtobufEncoder::valueType(cpuIdx, nanosecondsIdx);
+    int64_t periodValue = cpuSampleInterval.count() > 0 ? cpuSampleInterval.count() : 1;
 
     // Encode the profile
     ProtobufEncoder profile;
@@ -743,9 +769,9 @@ PprofProfiler::~PprofProfiler()
 
 } // namespace
 
-ref<EvalProfiler> makePprofProfiler(EvalState & state, std::filesystem::path profileFile, uint32_t sampleInterval)
+ref<EvalProfiler> makePprofProfiler(EvalState & state, std::filesystem::path profileFile, uint32_t cpuFrequency, uint64_t allocBytes)
 {
-    return make_ref<PprofProfiler>(state, profileFile, sampleInterval);
+    return make_ref<PprofProfiler>(state, profileFile, cpuFrequency, allocBytes);
 }
 
 } // namespace nix
