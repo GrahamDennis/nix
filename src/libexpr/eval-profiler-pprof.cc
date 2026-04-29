@@ -1,17 +1,24 @@
 #include "nix/expr/eval-profiler.hh"
 #include "nix/expr/nixexpr.hh"
 #include "nix/expr/eval.hh"
+#include "nix/expr/eval-gc.hh"
 #include "nix/expr/counter.hh"
 #include "nix/util/lru-cache.hh"
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <thread>
 #include <map>
 #include <sstream>
 #include <string>
 #include <unordered_map>
 #include <variant>
 #include <vector>
+
+#if NIX_USE_BOEHMGC
+#  include <gc/gc_mark.h>
+#endif
 
 namespace nix {
 
@@ -289,6 +296,54 @@ struct SampleData
     int64_t forceCount = 0;
 };
 
+static std::atomic<bool> heapSnapshotRequested{false};
+
+#if NIX_USE_BOEHMGC
+struct HeapCensusData
+{
+    uint64_t valueCount = 0;
+    uint64_t valueBytes = 0;
+    uint64_t envCount = 0;
+    uint64_t envBytes = 0;
+    uint64_t bindingsCount = 0;
+    uint64_t bindingsBytes = 0;
+    uint64_t otherCount = 0;
+    uint64_t otherBytes = 0;
+
+    static constexpr size_t valueSize = sizeof(Value);
+    static constexpr size_t envHeaderSize = sizeof(Env);
+    static constexpr size_t bindingsHeaderSize = sizeof(Bindings);
+};
+
+static void GC_CALLBACK heapCensusCallback(void * obj, size_t bytes, void * clientData)
+{
+    auto * census = static_cast<HeapCensusData *>(clientData);
+
+    if (bytes == HeapCensusData::valueSize) {
+        census->valueCount++;
+        census->valueBytes += bytes;
+    } else if (bytes >= HeapCensusData::envHeaderSize
+        && (bytes - HeapCensusData::envHeaderSize) % sizeof(Value *) == 0) {
+        census->envCount++;
+        census->envBytes += bytes;
+    } else if (bytes >= HeapCensusData::bindingsHeaderSize
+        && (bytes - HeapCensusData::bindingsHeaderSize) % sizeof(Attr) == 0) {
+        census->bindingsCount++;
+        census->bindingsBytes += bytes;
+    } else {
+        census->otherCount++;
+        census->otherBytes += bytes;
+    }
+}
+
+static void * performHeapCensusLocked(void * clientData)
+{
+    auto * census = static_cast<HeapCensusData *>(clientData);
+    GC_enumerate_reachable_objects_inner(heapCensusCallback, census);
+    return nullptr;
+}
+#endif
+
 class PprofProfiler : public EvalProfiler
 {
     Hooks getNeededHooksImpl() const override
@@ -305,6 +360,18 @@ public:
         , startTime(std::chrono::high_resolution_clock::now())
     {
         Counter::enabled = true;
+        auto triggerPath = profilePath.parent_path() / ".nix-heap-snapshot-trigger";
+        snapshotThread = std::thread([triggerPath]() {
+            while (true) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                std::error_code ec;
+                if (std::filesystem::exists(triggerPath, ec)) {
+                    std::filesystem::remove(triggerPath, ec);
+                    heapSnapshotRequested.store(true, std::memory_order_release);
+                }
+            }
+        });
+        snapshotThread.detach();
     }
 
     [[gnu::noinline]] void
@@ -321,6 +388,7 @@ public:
 private:
     FrameKey makeFrameKey(const Value & v, std::span<Value *> args, PosIdx pos);
     void writeProfile();
+    void writeHeapSnapshot();
 
     EvalState & state;
     std::chrono::nanoseconds sampleInterval;
@@ -334,6 +402,7 @@ private:
     std::vector<AllocSnapshot> allocStack;
     std::map<StackKey, SampleData> samples;
     uint64_t forceDepth = 0;
+    std::thread snapshotThread;
 };
 
 FrameKey PprofProfiler::makeFrameKey(const Value & v, std::span<Value *> args, PosIdx pos)
@@ -386,6 +455,9 @@ FrameKey PprofProfiler::makeFrameKey(const Value & v, std::span<Value *> args, P
 [[gnu::noinline]] void
 PprofProfiler::preFunctionCallHook(EvalState & state, const Value & v, std::span<Value *> args, const PosIdx pos)
 {
+    if (heapSnapshotRequested.exchange(false, std::memory_order_acquire)) [[unlikely]]
+        writeHeapSnapshot();
+
     frameStack.push_back(makeFrameKey(v, args, pos));
     allocStack.push_back(AllocSnapshot::capture(state.mem.getStats()));
 
@@ -536,6 +608,129 @@ void PprofProfiler::writeProfile()
         throw SysError("opening file %s", PathFmt(profilePath));
 
     writeFull(fd.get(), profile.data());
+}
+
+void PprofProfiler::writeHeapSnapshot()
+{
+#if NIX_USE_BOEHMGC
+    GC_gcollect();
+
+    HeapCensusData census;
+    GC_call_with_alloc_lock(performHeapCensusLocked, &census);
+
+    uint64_t liveBytes = census.valueBytes + census.envBytes + census.bindingsBytes + census.otherBytes;
+    uint64_t liveObjects = census.valueCount + census.envCount + census.bindingsCount + census.otherCount;
+
+    // Compute total allocated bytes across all stacks for proportional scaling
+    int64_t totalAllocBytes = 0;
+    int64_t totalAllocObjects = 0;
+    for (auto & [stack, data] : samples) {
+        totalAllocBytes += data.allocBytes;
+        totalAllocObjects += data.allocObjects;
+    }
+
+    StringTable strings;
+    std::map<FrameKey, uint64_t> functionIds;
+    std::map<FrameKey, uint64_t> locationIds;
+    std::vector<ProtobufEncoder> functions;
+    std::vector<ProtobufEncoder> locations;
+
+    uint64_t nextFunctionId = 1;
+    uint64_t nextLocationId = 1;
+
+    auto getOrCreateFunction = [&](const FrameKey & frame) -> uint64_t {
+        auto it = functionIds.find(frame);
+        if (it != functionIds.end())
+            return it->second;
+        auto id = nextFunctionId++;
+        auto nameIdx = strings.intern(frame.name);
+        auto filenameIdx = strings.intern(frame.filename);
+        functions.push_back(ProtobufEncoder::function(id, nameIdx, nameIdx, filenameIdx, frame.line));
+        functionIds[frame] = id;
+        return id;
+    };
+
+    auto getOrCreateLocation = [&](const FrameKey & frame) -> uint64_t {
+        auto it = locationIds.find(frame);
+        if (it != locationIds.end())
+            return it->second;
+        auto funcId = getOrCreateFunction(frame);
+        auto id = nextLocationId++;
+        std::vector<ProtobufEncoder> lines;
+        lines.push_back(ProtobufEncoder::line(funcId, frame.line));
+        locations.push_back(ProtobufEncoder::location(id, lines));
+        locationIds[frame] = id;
+        return id;
+    };
+
+    // Build samples: attribute live heap proportionally to allocating stacks.
+    // Each stack's share of live objects = (stack's alloc bytes / total alloc bytes) * live bytes.
+    std::vector<ProtobufEncoder> sampleMessages;
+
+    if (totalAllocBytes > 0) {
+        for (auto & [stack, data] : samples) {
+            if (data.allocBytes <= 0)
+                continue;
+
+            double fraction = static_cast<double>(data.allocBytes) / static_cast<double>(totalAllocBytes);
+            int64_t inuseObjects = static_cast<int64_t>(fraction * liveObjects);
+            int64_t inuseBytes = static_cast<int64_t>(fraction * liveBytes);
+
+            if (inuseObjects == 0 && inuseBytes == 0)
+                continue;
+
+            std::vector<uint64_t> locIds;
+            for (auto it = stack.rbegin(); it != stack.rend(); ++it)
+                locIds.push_back(getOrCreateLocation(*it));
+
+            std::vector<int64_t> values = {inuseObjects, inuseBytes};
+            sampleMessages.push_back(ProtobufEncoder::sample(locIds, values));
+        }
+    }
+
+    auto inuseObjectsIdx = strings.intern("inuse_objects");
+    auto inuseSpaceIdx = strings.intern("inuse_space");
+    auto countIdx = strings.intern("count");
+    auto bytesIdx = strings.intern("bytes");
+
+    std::vector<ProtobufEncoder> sampleTypes;
+    sampleTypes.push_back(ProtobufEncoder::valueType(inuseObjectsIdx, countIdx));
+    sampleTypes.push_back(ProtobufEncoder::valueType(inuseSpaceIdx, bytesIdx));
+
+    auto now = std::chrono::system_clock::now();
+    auto timeNanos = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+
+    auto spaceIdx = strings.intern("space");
+    auto periodType = ProtobufEncoder::valueType(spaceIdx, bytesIdx);
+
+    ProtobufEncoder profile;
+    profile.writeProfile(
+        sampleTypes,
+        sampleMessages,
+        locations,
+        functions,
+        strings.getStrings(),
+        timeNanos,
+        0,
+        periodType,
+        1
+    );
+
+    auto snapshotPath = profilePath.parent_path()
+        / ("nix-heap-" + std::to_string(std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count()) + ".pb");
+
+    auto fd = openNewFileForWrite(
+        snapshotPath,
+        0660,
+        {
+            .truncateExisting = true,
+            .followSymlinksOnTruncate = true,
+        });
+    if (!fd)
+        return;
+
+    writeFull(fd.get(), profile.data());
+#endif
 }
 
 PprofProfiler::~PprofProfiler()
