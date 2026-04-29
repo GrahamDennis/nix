@@ -25,9 +25,11 @@ public:
     enum Hook {
         preFunctionCall,
         postFunctionCall,
+        preForceValue,
+        postForceValue,
     };
 
-    static constexpr std::size_t numHooks = Hook::postFunctionCall + 1;
+    static constexpr std::size_t numHooks = Hook::postForceValue + 1;
     using Hooks = std::bitset<numHooks>;
 
 private:
@@ -75,6 +77,26 @@ public:
      */
     virtual void postFunctionCallHook(EvalState & state, const Value & v, std::span<Value *> args, const PosIdx pos);
 
+    /**
+     * Hook called before forcing a thunk value.
+     * Only called if (getNeededHooks().test(Hook::preForceValue)) is true.
+     *
+     * @param state Evaluator state.
+     * @param v Value being forced (still a thunk at this point).
+     * @param pos Position where the force was requested.
+     */
+    virtual void preForceValueHook(EvalState & state, Value & v, const PosIdx pos);
+
+    /**
+     * Hook called after forcing a thunk value.
+     * Only called if (getNeededHooks().test(Hook::postForceValue)) is true.
+     *
+     * @param state Evaluator state.
+     * @param v Value that was forced (now resolved).
+     * @param pos Position where the force was requested.
+     */
+    virtual void postForceValueHook(EvalState & state, Value & v, const PosIdx pos);
+
     virtual ~EvalProfiler() = default;
 
     /**
@@ -107,8 +129,16 @@ public:
     preFunctionCallHook(EvalState & state, const Value & v, std::span<Value *> args, const PosIdx pos) override;
     [[gnu::noinline]] void
     postFunctionCallHook(EvalState & state, const Value & v, std::span<Value *> args, const PosIdx pos) override;
+    [[gnu::noinline]] void
+    preForceValueHook(EvalState & state, Value & v, const PosIdx pos) override;
+    [[gnu::noinline]] void
+    postForceValueHook(EvalState & state, Value & v, const PosIdx pos) override;
 };
 
 ref<EvalProfiler> makeSampleStackProfiler(EvalState & state, std::filesystem::path profileFile, uint64_t frequency);
+
+ref<EvalProfiler> makeAllocationSampleStackProfiler(EvalState & state, std::filesystem::path profileFile, uint64_t frequency);
+
+ref<EvalProfiler> makePprofProfiler(EvalState & state, std::filesystem::path profileFile, uint64_t frequency);
 
 } // namespace nix

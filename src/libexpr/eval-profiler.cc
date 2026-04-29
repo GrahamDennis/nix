@@ -1,6 +1,7 @@
 #include "nix/expr/eval-profiler.hh"
 #include "nix/expr/nixexpr.hh"
 #include "nix/expr/eval.hh"
+#include "nix/expr/counter.hh"
 #include "nix/util/lru-cache.hh"
 
 namespace nix {
@@ -10,6 +11,10 @@ void EvalProfiler::preFunctionCallHook(EvalState & state, const Value & v, std::
 void EvalProfiler::postFunctionCallHook(EvalState & state, const Value & v, std::span<Value *> args, const PosIdx pos)
 {
 }
+
+void EvalProfiler::preForceValueHook(EvalState & state, Value & v, const PosIdx pos) {}
+
+void EvalProfiler::postForceValueHook(EvalState & state, Value & v, const PosIdx pos) {}
 
 void MultiEvalProfiler::preFunctionCallHook(
     EvalState & state, const Value & v, std::span<Value *> args, const PosIdx pos)
@@ -26,6 +31,22 @@ void MultiEvalProfiler::postFunctionCallHook(
     for (auto & profiler : profilers) {
         if (profiler->getNeededHooks().test(Hook::postFunctionCall))
             profiler->postFunctionCallHook(state, v, args, pos);
+    }
+}
+
+void MultiEvalProfiler::preForceValueHook(EvalState & state, Value & v, const PosIdx pos)
+{
+    for (auto & profiler : profilers) {
+        if (profiler->getNeededHooks().test(Hook::preForceValue))
+            profiler->preForceValueHook(state, v, pos);
+    }
+}
+
+void MultiEvalProfiler::postForceValueHook(EvalState & state, Value & v, const PosIdx pos)
+{
+    for (auto & profiler : profilers) {
+        if (profiler->getNeededHooks().test(Hook::postForceValue))
+            profiler->postForceValueHook(state, v, pos);
     }
 }
 
@@ -348,6 +369,253 @@ SampleStack::~SampleStack()
     }
 }
 
+struct AllocCounters
+{
+    uint64_t nrValues;
+    uint64_t nrEnvs;
+    uint64_t nrValuesInEnvs;
+    uint64_t nrAttrsets;
+    uint64_t nrAttrsInAttrsets;
+    uint64_t nrListElems;
+
+    static AllocCounters snapshot(const EvalMemory::Statistics & stats)
+    {
+        return {
+            .nrValues = stats.nrValues.load(),
+            .nrEnvs = stats.nrEnvs.load(),
+            .nrValuesInEnvs = stats.nrValuesInEnvs.load(),
+            .nrAttrsets = stats.nrAttrsets.load(),
+            .nrAttrsInAttrsets = stats.nrAttrsInAttrsets.load(),
+            .nrListElems = stats.nrListElems.load(),
+        };
+    }
+
+    AllocCounters operator-(const AllocCounters & rhs) const
+    {
+        return {
+            .nrValues = nrValues - rhs.nrValues,
+            .nrEnvs = nrEnvs - rhs.nrEnvs,
+            .nrValuesInEnvs = nrValuesInEnvs - rhs.nrValuesInEnvs,
+            .nrAttrsets = nrAttrsets - rhs.nrAttrsets,
+            .nrAttrsInAttrsets = nrAttrsInAttrsets - rhs.nrAttrsInAttrsets,
+            .nrListElems = nrListElems - rhs.nrListElems,
+        };
+    }
+
+    AllocCounters & operator+=(const AllocCounters & rhs)
+    {
+        nrValues += rhs.nrValues;
+        nrEnvs += rhs.nrEnvs;
+        nrValuesInEnvs += rhs.nrValuesInEnvs;
+        nrAttrsets += rhs.nrAttrsets;
+        nrAttrsInAttrsets += rhs.nrAttrsInAttrsets;
+        nrListElems += rhs.nrListElems;
+        return *this;
+    }
+
+    bool nonZero() const
+    {
+        return nrValues || nrEnvs || nrAttrsets || nrListElems;
+    }
+
+    uint64_t totalBytes() const
+    {
+        return nrValues * sizeof(Value)
+            + nrEnvs * sizeof(Env)
+            + nrValuesInEnvs * sizeof(Value *)
+            + nrAttrsets * sizeof(Bindings)
+            + nrAttrsInAttrsets * sizeof(Attr)
+            + nrListElems * sizeof(Value *);
+    }
+
+    uint64_t totalObjects() const
+    {
+        return nrValues + nrEnvs + nrAttrsets;
+    }
+};
+
+/**
+ * Allocation profiler that attributes memory allocations to Nix function call stacks.
+ *
+ * On each function call entry, snapshots the global allocation counters. On exit,
+ * computes deltas and attributes them to the current call stack. Outputs folded
+ * stacks with allocation counts, suitable for flamegraph visualization.
+ */
+class AllocationSampleStack : public EvalProfiler
+{
+    static constexpr std::chrono::microseconds profileDumpInterval = std::chrono::milliseconds(2000);
+
+    Hooks getNeededHooksImpl() const override
+    {
+        return Hooks().set(preFunctionCall).set(postFunctionCall);
+    }
+
+    FrameInfo getPrimOpFrameInfo(const PrimOp & primOp, std::span<Value *> args, PosIdx pos);
+
+public:
+    AllocationSampleStack(EvalState & state, const std::filesystem::path & profileFile, std::chrono::nanoseconds period)
+        : state(state)
+        , sampleInterval(period)
+        , profileFd([&]() {
+            auto fd = openNewFileForWrite(
+                profileFile,
+                0660,
+                {
+                    .truncateExisting = true,
+                    .followSymlinksOnTruncate = true,
+                });
+            if (!fd)
+                throw SysError("opening file %s", PathFmt(profileFile));
+            return fd;
+        }())
+        , posCache(state)
+    {
+        Counter::enabled = true;
+    }
+
+    [[gnu::noinline]] void
+    preFunctionCallHook(EvalState & state, const Value & v, std::span<Value *> args, const PosIdx pos) override;
+    [[gnu::noinline]] void
+    postFunctionCallHook(EvalState & state, const Value & v, std::span<Value *> args, const PosIdx pos) override;
+
+    void maybeSaveProfile(std::chrono::time_point<std::chrono::high_resolution_clock> now);
+    void saveProfile();
+    FrameInfo getFrameInfoFromValueAndPos(const Value & v, std::span<Value *> args, PosIdx pos);
+
+    AllocationSampleStack(AllocationSampleStack &&) = default;
+    AllocationSampleStack & operator=(AllocationSampleStack &&) = delete;
+    AllocationSampleStack(const AllocationSampleStack &) = delete;
+    AllocationSampleStack & operator=(const AllocationSampleStack &) = delete;
+    ~AllocationSampleStack();
+
+private:
+    EvalState & state;
+    std::chrono::nanoseconds sampleInterval;
+    AutoCloseFD profileFd;
+    FrameStack stack;
+    std::vector<AllocCounters> counterStack;
+    std::map<FrameStack, AllocCounters> allocsByStack;
+    std::chrono::time_point<std::chrono::high_resolution_clock> lastStackSample =
+        std::chrono::high_resolution_clock::now();
+    std::chrono::time_point<std::chrono::high_resolution_clock> lastDump = std::chrono::high_resolution_clock::now();
+    PosCache posCache;
+};
+
+FrameInfo AllocationSampleStack::getPrimOpFrameInfo(const PrimOp & primOp, std::span<Value *> args, PosIdx pos)
+{
+    auto derivationInfo = [&]() -> std::optional<FrameInfo> {
+        if (primOp.name == "derivationStrict") {
+            try {
+                state.forceAttrs(*args[0], pos, "");
+                auto attrs = args[0]->attrs();
+                auto nameAttr = state.getAttr(state.s.name, attrs, "");
+                auto drvName = std::string(state.forceStringNoCtx(*nameAttr->value, pos, ""));
+                return DerivationStrictFrameInfo{.callPos = pos, .drvName = std::move(drvName)};
+            } catch (...) {
+            }
+        }
+        return std::nullopt;
+    }();
+
+    return derivationInfo.value_or(PrimOpFrameInfo{.expr = &primOp, .callPos = pos});
+}
+
+FrameInfo AllocationSampleStack::getFrameInfoFromValueAndPos(const Value & v, std::span<Value *> args, PosIdx pos)
+{
+    if (v.isLambda())
+        return LambdaFrameInfo{.expr = v.lambda().fun, .callPos = pos};
+    else if (v.isPrimOp())
+        return getPrimOpFrameInfo(*v.primOp(), args, pos);
+    else if (v.isPrimOpApp())
+        return PrimOpFrameInfo{.expr = v.primOpAppPrimOp(), .callPos = pos};
+    else if (state.isFunctor(v)) {
+        const auto functor = v.attrs()->get(state.s.functor);
+        if (auto pos_ = posCache.lookup(pos); std::holds_alternative<std::monostate>(pos_.origin))
+            return FunctorFrameInfo{.pos = functor->pos};
+        return FunctorFrameInfo{.pos = pos};
+    } else
+        return GenericFrameInfo{.pos = pos};
+}
+
+[[gnu::noinline]] void
+AllocationSampleStack::preFunctionCallHook(EvalState & state, const Value & v, std::span<Value *> args, const PosIdx pos)
+{
+    stack.push_back(getFrameInfoFromValueAndPos(v, args, pos));
+    counterStack.push_back(AllocCounters::snapshot(state.mem.getStats()));
+
+    auto now = std::chrono::high_resolution_clock::now();
+    maybeSaveProfile(now);
+}
+
+[[gnu::noinline]] void
+AllocationSampleStack::postFunctionCallHook(EvalState & state, const Value & v, std::span<Value *> args, const PosIdx pos)
+{
+    if (stack.empty())
+        return;
+
+    auto entryCounters = counterStack.back();
+    counterStack.pop_back();
+    auto currentCounters = AllocCounters::snapshot(state.mem.getStats());
+    auto delta = currentCounters - entryCounters;
+
+    if (delta.nonZero()) {
+        bool shouldSample = true;
+        if (sampleInterval.count() > 0) {
+            auto now = std::chrono::high_resolution_clock::now();
+            shouldSample = (now - lastStackSample) > sampleInterval;
+            if (shouldSample)
+                lastStackSample = now;
+        }
+
+        if (shouldSample)
+            allocsByStack[stack] += delta;
+    }
+
+    stack.pop_back();
+}
+
+void AllocationSampleStack::maybeSaveProfile(std::chrono::time_point<std::chrono::high_resolution_clock> now)
+{
+    if (now - lastDump >= profileDumpInterval)
+        saveProfile();
+    else
+        return;
+
+    lastDump = std::chrono::high_resolution_clock::now();
+    allocsByStack.clear();
+}
+
+void AllocationSampleStack::saveProfile()
+{
+    auto os = std::ostringstream{};
+    for (auto & [stack, allocs] : allocsByStack) {
+        if (!allocs.nonZero())
+            continue;
+
+        auto first = true;
+        for (auto & frame : stack) {
+            if (first)
+                first = false;
+            else
+                os << ";";
+            std::visit([&](auto && info) { info.symbolize(state, os, posCache); }, frame);
+        }
+        os << " " << allocs.totalBytes();
+        writeLine(profileFd.get(), os.str());
+        os.str("");
+        os.clear();
+    }
+}
+
+AllocationSampleStack::~AllocationSampleStack()
+{
+    try {
+        saveProfile();
+    } catch (...) {
+        ignoreExceptionInDestructor();
+    }
+}
+
 } // namespace
 
 ref<EvalProfiler> makeSampleStackProfiler(EvalState & state, std::filesystem::path profileFile, uint64_t frequency)
@@ -357,6 +625,14 @@ ref<EvalProfiler> makeSampleStackProfiler(EvalState & state, std::filesystem::pa
                                           ? std::chrono::nanoseconds{0}
                                           : std::chrono::nanoseconds{std::nano::den / frequency / std::nano::num};
     return make_ref<SampleStack>(state, profileFile, period);
+}
+
+ref<EvalProfiler> makeAllocationSampleStackProfiler(EvalState & state, std::filesystem::path profileFile, uint64_t frequency)
+{
+    std::chrono::nanoseconds period = frequency == 0
+                                          ? std::chrono::nanoseconds{0}
+                                          : std::chrono::nanoseconds{std::nano::den / frequency / std::nano::num};
+    return make_ref<AllocationSampleStack>(state, profileFile, period);
 }
 
 } // namespace nix

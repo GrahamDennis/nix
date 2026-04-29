@@ -663,7 +663,14 @@ public:
      */
     inline void forceValue(Value & v, const PosIdx pos)
     {
+        auto hooks = profiler.getNeededHooks();
+        if (hooks.test(EvalProfiler::preForceValue)) [[unlikely]]
+            profiler.preForceValueHook(*this, v, pos);
+
         v.force(*this, pos);
+
+        if (hooks.test(EvalProfiler::postForceValue)) [[unlikely]]
+            profiler.postForceValueHook(*this, v, pos);
     }
 
     void tryFixupBlackHolePos(Value & v, PosIdx pos);

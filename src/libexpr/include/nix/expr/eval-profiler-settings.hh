@@ -5,7 +5,7 @@
 
 namespace nix {
 
-enum struct EvalProfilerMode { disabled, flamegraph };
+enum struct EvalProfilerMode { disabled, flamegraph, allocs, pprof };
 
 template<>
 EvalProfilerMode BaseSetting<EvalProfilerMode>::parse(const std::string & str) const;

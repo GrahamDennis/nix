@@ -386,6 +386,14 @@ EvalState::EvalState(
         profiler.addProfiler(
             makeSampleStackProfiler(*this, settings.evalProfileFile.get(), settings.evalProfilerFrequency));
         break;
+    case EvalProfilerMode::allocs:
+        profiler.addProfiler(
+            makeAllocationSampleStackProfiler(*this, settings.evalProfileFile.get(), settings.evalProfilerFrequency));
+        break;
+    case EvalProfilerMode::pprof:
+        profiler.addProfiler(
+            makePprofProfiler(*this, settings.evalProfileFile.get(), settings.evalProfilerFrequency));
+        break;
     case EvalProfilerMode::disabled:
         break;
     }

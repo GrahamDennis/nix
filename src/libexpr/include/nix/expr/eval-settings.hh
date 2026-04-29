@@ -262,6 +262,8 @@ struct EvalSettings : Config
           Enables evaluation profiling. The following modes are supported:
 
           * `flamegraph` stack sampling profiler. Outputs folded format, one line per stack (suitable for `flamegraph.pl` and compatible tools).
+          * `allocs` allocation profiler. Attributes memory allocations (Values, Envs, attrsets, list elements) to Nix function call stacks. Outputs folded format with allocation bytes as the sample value.
+          * `pprof` combined profiler. Outputs profiles in the pprof protobuf format with both CPU time samples and allocation data. Compatible with `go tool pprof` and other pprof-compatible tools.
 
           Use [`eval-profile-file`](#conf-eval-profile-file) to specify where the profile is saved.
 

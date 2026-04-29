@@ -171,6 +171,7 @@ sources = files(
   'eval-error.cc',
   'eval-gc.cc',
   'eval-profiler-settings.cc',
+  'eval-profiler-pprof.cc',
   'eval-profiler.cc',
   'eval-settings.cc',
   'eval.cc',
