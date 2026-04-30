@@ -403,6 +403,7 @@ private:
         Value ** args;
         size_t nargs;
         PosIdx pos;
+        std::string errorContext;
     };
 
     std::chrono::time_point<std::chrono::high_resolution_clock> lastCpuSample =
@@ -467,7 +468,22 @@ PprofProfiler::preFunctionCallHook(EvalState & state, const Value & v, std::span
     if (heapSnapshotRequested.exchange(false, std::memory_order_acquire)) [[unlikely]]
         writeHeapSnapshot();
 
-    pendingStack.push_back({&v, args.data(), args.size(), pos});
+    std::string errorCtx;
+    if (v.isPrimOp() && args.size() >= 1
+        && (v.primOp()->name == "__addErrorContext" || v.primOp()->name == "addErrorContext")) {
+        if (args[0]->type() == nString) {
+            errorCtx = std::string(args[0]->string_view());
+        } else {
+            try {
+                state.forceValue(*args[0], pos);
+                if (args[0]->type() == nString)
+                    errorCtx = std::string(args[0]->string_view());
+            } catch (...) {
+            }
+        }
+    }
+
+    pendingStack.push_back({&v, args.data(), args.size(), pos, std::move(errorCtx)});
 
     bool cpuSample = false;
     bool allocSample = false;
@@ -497,8 +513,12 @@ void PprofProfiler::doSample(EvalState & state, bool cpuSample, bool allocSample
 
     StackKey stack;
     stack.reserve(pendingStack.size());
-    for (auto & pf : pendingStack)
-        stack.push_back(makeFrameKey(*pf.v, {pf.args, pf.nargs}, pf.pos));
+    for (auto & pf : pendingStack) {
+        if (!pf.errorContext.empty())
+            stack.push_back({.name = pf.errorContext, .filename = "<context>", .line = 0});
+        else
+            stack.push_back(makeFrameKey(*pf.v, {pf.args, pf.nargs}, pf.pos));
+    }
 
     auto & sd = samples[stack];
     if (cpuSample)
