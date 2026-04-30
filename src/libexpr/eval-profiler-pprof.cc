@@ -293,7 +293,6 @@ struct SampleData
     int64_t cpuSamples = 0;
     int64_t allocObjects = 0;
     int64_t allocBytes = 0;
-    int64_t forceCount = 0;
 };
 
 static std::atomic<bool> heapSnapshotRequested{false};
@@ -348,7 +347,7 @@ class PprofProfiler : public EvalProfiler
 {
     Hooks getNeededHooksImpl() const override
     {
-        return Hooks().set(preFunctionCall).set(postFunctionCall).set(preForceValue).set(postForceValue);
+        return Hooks().set(preFunctionCall).set(postFunctionCall);
     }
 
 public:
@@ -381,10 +380,6 @@ public:
     preFunctionCallHook(EvalState & state, const Value & v, std::span<Value *> args, const PosIdx pos) override;
     [[gnu::noinline]] void
     postFunctionCallHook(EvalState & state, const Value & v, std::span<Value *> args, const PosIdx pos) override;
-    [[gnu::noinline]] void
-    preForceValueHook(EvalState & state, Value & v, const PosIdx pos) override;
-    [[gnu::noinline]] void
-    postForceValueHook(EvalState & state, Value & v, const PosIdx pos) override;
 
     ~PprofProfiler() override;
 
@@ -521,15 +516,6 @@ PprofProfiler::postFunctionCallHook(EvalState & state, const Value & v, std::spa
         pendingStack.pop_back();
 }
 
-[[gnu::noinline]] void
-PprofProfiler::preForceValueHook(EvalState & state, Value & v, const PosIdx pos)
-{
-}
-
-[[gnu::noinline]] void
-PprofProfiler::postForceValueHook(EvalState & state, Value & v, const PosIdx pos)
-{
-}
 
 void PprofProfiler::writeProfile()
 {
@@ -569,24 +555,22 @@ void PprofProfiler::writeProfile()
         return id;
     };
 
-    // Build sample types: [samples/count, alloc_objects/count, alloc_space/bytes, force/count]
-    auto samplesIdx = strings.intern("samples");
+    // Build sample types: alloc_objects, alloc_space, samples (last = default in pprof)
     auto countIdx = strings.intern("count");
     auto allocObjectsIdx = strings.intern("alloc_objects");
     auto allocSpaceIdx = strings.intern("alloc_space");
     auto bytesIdx = strings.intern("bytes");
-    auto forceIdx = strings.intern("force");
+    auto samplesIdx = strings.intern("samples");
 
     std::vector<ProtobufEncoder> sampleTypes;
-    sampleTypes.push_back(ProtobufEncoder::valueType(samplesIdx, countIdx));
     sampleTypes.push_back(ProtobufEncoder::valueType(allocObjectsIdx, countIdx));
     sampleTypes.push_back(ProtobufEncoder::valueType(allocSpaceIdx, bytesIdx));
-    sampleTypes.push_back(ProtobufEncoder::valueType(forceIdx, countIdx));
+    sampleTypes.push_back(ProtobufEncoder::valueType(samplesIdx, countIdx));
 
     // Build samples
     std::vector<ProtobufEncoder> sampleMessages;
     for (auto & [stack, data] : samples) {
-        if (data.cpuSamples == 0 && data.allocObjects == 0 && data.allocBytes == 0 && data.forceCount == 0)
+        if (data.cpuSamples == 0 && data.allocObjects == 0 && data.allocBytes == 0)
             continue;
 
         // Location IDs in leaf-to-root order (pprof convention)
@@ -594,7 +578,7 @@ void PprofProfiler::writeProfile()
         for (auto it = stack.rbegin(); it != stack.rend(); ++it)
             locIds.push_back(getOrCreateLocation(*it));
 
-        std::vector<int64_t> values = {data.cpuSamples, data.allocObjects, data.allocBytes, data.forceCount};
+        std::vector<int64_t> values = {data.allocObjects, data.allocBytes, data.cpuSamples};
         sampleMessages.push_back(ProtobufEncoder::sample(locIds, values));
     }
 
